@@ -1,8 +1,9 @@
+
 import React, { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Download, FileIcon, File, FileText, FileImage, FilePdf as FileDocumentIcon } from "lucide-react";
+import { Download, FileIcon, File, FileText, FileImage, FileType } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -139,7 +140,7 @@ VPN Connection,Automatic,2023-03-15`;
       case "image":
         return <FileImage className="h-5 w-5" />;
       case "pdf":
-        return <FileDocumentIcon className="h-5 w-5" />;
+        return <FileType className="h-5 w-5" />; // Changed from FilePdf to FileType
       case "certificate":
         return <File className="h-5 w-5" />;
       default:
