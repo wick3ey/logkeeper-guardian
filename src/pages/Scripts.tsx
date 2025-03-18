@@ -11,31 +11,41 @@ import { Label } from "@/components/ui/label";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { CodePreview } from "@/components/scripts/CodePreview";
 import { toast } from "sonner";
+import { Loader2 } from "lucide-react";
 
-const fetchScripts = async () => {
+// Define a type for script data
+interface ScriptsData {
+  [key: string]: string;
+}
+
+const fetchScripts = async (): Promise<ScriptsData> => {
+  console.log("Fetching scripts from API...");
   try {
     const response = await fetch('/api/scripts');
     if (!response.ok) {
-      throw new Error('Failed to fetch scripts');
+      throw new Error(`Failed to fetch scripts: ${response.status} ${response.statusText}`);
     }
-    return await response.json();
+    const data = await response.json();
+    console.log("Fetched scripts:", data);
+    return data;
   } catch (error) {
     console.error("Error fetching scripts:", error);
-    return {}; // Return empty object instead of throwing error
+    throw error; // Rethrow to be handled by React Query
   }
 };
 
 export default function Scripts() {
-  const [activeScript, setActiveScript] = useState("");
+  const [activeScript, setActiveScript] = useState<string>("");
   const [isAddScriptOpen, setIsAddScriptOpen] = useState(false);
   const [newScriptName, setNewScriptName] = useState("");
   const [newScriptContent, setNewScriptContent] = useState("");
   const queryClient = useQueryClient();
 
-  const { data: scripts = {}, isLoading } = useQuery({
+  const { data: scripts, isLoading, isError, error } = useQuery({
     queryKey: ['scripts'],
     queryFn: fetchScripts,
-    placeholderData: {}
+    retry: 2,
+    staleTime: 1000 * 60 * 5, // 5 minutes
   });
 
   const addScriptMutation = useMutation({
@@ -49,7 +59,8 @@ export default function Scripts() {
       });
       
       if (!response.ok) {
-        throw new Error('Failed to add script');
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Failed to add script');
       }
       
       return response.json();
@@ -61,9 +72,9 @@ export default function Scripts() {
       setNewScriptName("");
       setNewScriptContent("");
     },
-    onError: (error) => {
+    onError: (error: Error) => {
       console.error("Error adding script:", error);
-      toast.error("Kunde inte lägga till script");
+      toast.error(`Kunde inte lägga till script: ${error.message}`);
     },
   });
 
@@ -79,11 +90,15 @@ export default function Scripts() {
     });
   };
 
-  const scriptTypes = Object.keys(scripts || {});
+  // Get script types (keys) from the scripts object
+  const scriptTypes = scripts ? Object.keys(scripts) : [];
   
-  if (!activeScript && scriptTypes.length > 0 && !isLoading) {
-    setActiveScript(scriptTypes[0]);
-  }
+  // Set active script to first one if none selected and scripts are available
+  React.useEffect(() => {
+    if (!activeScript && scriptTypes.length > 0 && !isLoading) {
+      setActiveScript(scriptTypes[0]);
+    }
+  }, [activeScript, scriptTypes, isLoading]);
 
   return (
     <div className="h-full flex-1 flex-col space-y-8 p-8 md:flex">
@@ -111,7 +126,16 @@ export default function Scripts() {
                 <TableBody>
                   {isLoading ? (
                     <TableRow>
-                      <TableCell>Laddar scripts...</TableCell>
+                      <TableCell className="text-center py-8">
+                        <Loader2 className="h-6 w-6 animate-spin inline-block mr-2" />
+                        Laddar scripts...
+                      </TableCell>
+                    </TableRow>
+                  ) : isError ? (
+                    <TableRow>
+                      <TableCell className="text-destructive">
+                        Fel vid hämtning av scripts: {(error as Error)?.message || "Okänt fel"}
+                      </TableCell>
                     </TableRow>
                   ) : scriptTypes.length === 0 ? (
                     <TableRow>
@@ -145,13 +169,20 @@ export default function Scripts() {
           <CardContent>
             <ScrollArea className="h-[500px] w-full">
               {isLoading ? (
-                <div>Laddar kod...</div>
+                <div className="flex items-center justify-center h-full">
+                  <Loader2 className="h-6 w-6 animate-spin mr-2" />
+                  Laddar kod...
+                </div>
+              ) : isError ? (
+                <div className="text-destructive p-4">
+                  Fel vid hämtning av kod: {(error as Error)?.message || "Okänt fel"}
+                </div>
               ) : !activeScript ? (
                 <div className="text-center p-4 text-muted-foreground">
                   Inget script valt eller inga scripts tillgängliga
                 </div>
               ) : (
-                <CodePreview code={scripts[activeScript] || ""} />
+                <CodePreview code={scripts && scripts[activeScript] ? scripts[activeScript] : ""} />
               )}
             </ScrollArea>
           </CardContent>
@@ -189,8 +220,22 @@ export default function Scripts() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAddScriptOpen(false)}>Avbryt</Button>
-            <Button onClick={handleAddScript}>Spara script</Button>
+            <Button variant="outline" onClick={() => setIsAddScriptOpen(false)} disabled={addScriptMutation.isPending}>
+              Avbryt
+            </Button>
+            <Button 
+              onClick={handleAddScript} 
+              disabled={addScriptMutation.isPending}
+            >
+              {addScriptMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Sparar...
+                </>
+              ) : (
+                "Spara script"
+              )}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
