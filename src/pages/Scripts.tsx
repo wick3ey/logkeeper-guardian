@@ -1,4 +1,3 @@
-
 import React, { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -12,26 +11,11 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { CodePreview } from "@/components/scripts/CodePreview";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
-
-// Define a type for script data
-interface ScriptsData {
-  [key: string]: string;
-}
+import { getScripts, ScriptsData } from "@/services/scriptsService";
 
 const fetchScripts = async (): Promise<ScriptsData> => {
   console.log("Fetching scripts from API...");
-  try {
-    const response = await fetch('/api/scripts');
-    if (!response.ok) {
-      throw new Error(`Failed to fetch scripts: ${response.status} ${response.statusText}`);
-    }
-    const data = await response.json();
-    console.log("Fetched scripts:", data);
-    return data;
-  } catch (error) {
-    console.error("Error fetching scripts:", error);
-    throw error; // Rethrow to be handled by React Query
-  }
+  return getScripts();
 };
 
 export default function Scripts() {
@@ -90,10 +74,8 @@ export default function Scripts() {
     });
   };
 
-  // Get script types (keys) from the scripts object
   const scriptTypes = scripts ? Object.keys(scripts) : [];
   
-  // Set active script to first one if none selected and scripts are available
   React.useEffect(() => {
     if (!activeScript && scriptTypes.length > 0 && !isLoading) {
       setActiveScript(scriptTypes[0]);
