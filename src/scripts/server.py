@@ -1,3 +1,4 @@
+
 #!/usr/bin/python
 import os
 import sys
@@ -56,10 +57,6 @@ else:
 # Session key for Flask
 app.secret_key = os.urandom(24)
 
-# Ensure log directories exist
-os.makedirs(LOG_DIRECTORY, exist_ok=True)
-os.makedirs(CLIENT_LOGS_DIRECTORY, exist_ok=True)
-
 # Setup logging - Regular application logging
 logging.basicConfig(
     level=logging.DEBUG,
@@ -98,6 +95,9 @@ logging.info(f"All-in-one log file: {ALL_IN_LOG_FILE}")
 auto_ping_thread = None
 auto_ping_running = False
 
+# Global flag för first_request hantering (ersätter before_first_request)
+first_request_done = False
+
 def log_client_communication(direction, client_id, endpoint, data, status_code=None):
     """Log detailed client communication data to allin.log"""
     try:
@@ -131,6 +131,20 @@ def log_client_communication(direction, client_id, endpoint, data, status_code=N
         logging.debug(traceback.format_exc())
 
 # ... keep existing code (user authentication and client status functionality)
+
+# Lägg till before_request hanterare för att ersätta before_first_request
+@app.before_request
+def create_directories_on_first_request():
+    global first_request_done
+    if not first_request_done:
+        logging.info("Första förfrågan hanterad - skapar nödvändiga kataloger")
+        # Skapa nödvändiga kataloger vid första förfrågan
+        os.makedirs(LOG_DIRECTORY, exist_ok=True)
+        os.makedirs(CLIENT_LOGS_DIRECTORY, exist_ok=True)
+        os.makedirs(CONFIG_DIRECTORY, exist_ok=True)
+        os.makedirs(STATIC_DIRECTORY, exist_ok=True)
+        os.makedirs(TEMPLATES_DIRECTORY, exist_ok=True)
+        first_request_done = True
 
 @app.route("/api/register", methods=["POST"])
 def api_register():
@@ -497,15 +511,7 @@ def serve_static(path):
         return send_file(os.path.join(STATIC_DIRECTORY, 'index.html'))
     return send_file(os.path.join(STATIC_DIRECTORY, path))
 
-# Create necessary directories
-@app.before_first_request
-def create_directories():
-    """Ensure all required directories exist."""
-    os.makedirs(LOG_DIRECTORY, exist_ok=True)
-    os.makedirs(CLIENT_LOGS_DIRECTORY, exist_ok=True)
-    os.makedirs(CONFIG_DIRECTORY, exist_ok=True)
-    os.makedirs(STATIC_DIRECTORY, exist_ok=True)
-    os.makedirs(TEMPLATES_DIRECTORY, exist_ok=True)
+# Ta bort before_first_request dekoratör och använd before_request istället
 
 # Run the server directly instead of using mod_wsgi
 if __name__ == "__main__":
