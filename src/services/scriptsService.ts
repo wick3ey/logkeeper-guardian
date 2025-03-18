@@ -1,3 +1,4 @@
+
 import { INSTRUCTION_CODE } from './scriptData';
 
 // Interface definitions
@@ -151,9 +152,9 @@ export async function getScripts(): Promise<ScriptsData> {
 }
 
 // Get client instructions using the legacy endpoint (for backward compatibility)
-export async function getClientInstructions(clientId: string): Promise<ArrayBuffer | null> {
+export async function getClientInstructions(clientId: string): Promise<string | null> {
   const endpoint = `${SERVER_BASE_URL}${API_GET_INSTRUCTIONS_ENDPOINT}?client_id=${clientId}`;
-  logClientCommunication('SENT', endpoint, { headers: { Authorization: '***', Accept: 'application/octet-stream' } });
+  logClientCommunication('SENT', endpoint, { headers: { Authorization: '***', Accept: 'text/plain' } });
   
   try {
     console.log(`Fetching instructions for client ${clientId} using legacy endpoint`);
@@ -162,7 +163,7 @@ export async function getClientInstructions(clientId: string): Promise<ArrayBuff
     const response = await fetch(endpoint, {
       headers: {
         'Authorization': `Bearer ${AUTH_TOKEN}`,
-        'Accept': 'application/octet-stream'  // Explicitly request binary data
+        'Accept': 'text/plain'  // Explicitly request text data instead of binary
       }
     });
     
@@ -173,11 +174,11 @@ export async function getClientInstructions(clientId: string): Promise<ArrayBuff
       throw error;
     }
     
-    const data = await response.arrayBuffer();
-    logClientCommunication('RECEIVED', endpoint, `Binary data of length ${data.byteLength}`, response.status);
-    console.log(`Successfully received binary data from server for client ${clientId}`);
+    const data = await response.text();
+    logClientCommunication('RECEIVED', endpoint, `Text data of length ${data.length}`, response.status);
+    console.log(`Successfully received text data from server for client ${clientId}`);
     
-    // Return the raw ArrayBuffer for marshal-encoded data
+    // Return the raw text data
     return data;
     
   } catch (error) {
