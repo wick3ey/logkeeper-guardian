@@ -1,3 +1,4 @@
+
 import React, { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -7,8 +8,10 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { CodePreview } from "@/components/scripts/CodePreview";
+import { InstructionSelector } from "@/components/scripts/InstructionSelector";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { getScripts, ScriptsData } from "@/services/scriptsService";
@@ -23,6 +26,7 @@ export default function Scripts() {
   const [isAddScriptOpen, setIsAddScriptOpen] = useState(false);
   const [newScriptName, setNewScriptName] = useState("");
   const [newScriptContent, setNewScriptContent] = useState("");
+  const [activeTab, setActiveTab] = useState("scripts");
   const queryClient = useQueryClient();
 
   const { data: scripts, isLoading, isError, error } = useQuery({
@@ -86,90 +90,105 @@ export default function Scripts() {
     <div className="h-full flex-1 flex-col space-y-8 p-8 md:flex">
       <div className="flex items-center justify-between">
         <h2 className="text-3xl font-bold tracking-tight">Scripts</h2>
-        <Button onClick={() => setIsAddScriptOpen(true)}>Lägg till script</Button>
+        <div className="flex gap-2">
+          <Button onClick={() => setIsAddScriptOpen(true)}>Lägg till script</Button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="md:col-span-1">
-          <CardHeader>
-            <CardTitle>Tillgängliga Scripts</CardTitle>
-            <CardDescription>
-              Välj ett script för att se dess kod
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ScrollArea className="h-[500px]">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Scriptnamn</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {isLoading ? (
-                    <TableRow>
-                      <TableCell className="text-center py-8">
-                        <Loader2 className="h-6 w-6 animate-spin inline-block mr-2" />
-                        Laddar scripts...
-                      </TableCell>
-                    </TableRow>
-                  ) : isError ? (
-                    <TableRow>
-                      <TableCell className="text-destructive">
-                        Fel vid hämtning av scripts: {(error as Error)?.message || "Okänt fel"}
-                      </TableCell>
-                    </TableRow>
-                  ) : scriptTypes.length === 0 ? (
-                    <TableRow>
-                      <TableCell>Inga scripts tillgängliga</TableCell>
-                    </TableRow>
-                  ) : (
-                    scriptTypes.map((scriptType) => (
-                      <TableRow 
-                        key={scriptType}
-                        className={activeScript === scriptType ? "bg-secondary" : ""}
-                        onClick={() => setActiveScript(scriptType)}
-                        style={{ cursor: 'pointer' }}
-                      >
-                        <TableCell className="font-medium">{scriptType}</TableCell>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="scripts">Script Bibliotek</TabsTrigger>
+          <TabsTrigger value="instructions">Klientinstruktioner</TabsTrigger>
+        </TabsList>
+        
+        <TabsContent value="scripts" className="mt-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <Card className="md:col-span-1">
+              <CardHeader>
+                <CardTitle>Tillgängliga Scripts</CardTitle>
+                <CardDescription>
+                  Välj ett script för att se dess kod
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ScrollArea className="h-[500px]">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Scriptnamn</TableHead>
                       </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </ScrollArea>
-          </CardContent>
-        </Card>
+                    </TableHeader>
+                    <TableBody>
+                      {isLoading ? (
+                        <TableRow>
+                          <TableCell className="text-center py-8">
+                            <Loader2 className="h-6 w-6 animate-spin inline-block mr-2" />
+                            Laddar scripts...
+                          </TableCell>
+                        </TableRow>
+                      ) : isError ? (
+                        <TableRow>
+                          <TableCell className="text-destructive">
+                            Fel vid hämtning av scripts: {(error as Error)?.message || "Okänt fel"}
+                          </TableCell>
+                        </TableRow>
+                      ) : scriptTypes.length === 0 ? (
+                        <TableRow>
+                          <TableCell>Inga scripts tillgängliga</TableCell>
+                        </TableRow>
+                      ) : (
+                        scriptTypes.map((scriptType) => (
+                          <TableRow 
+                            key={scriptType}
+                            className={activeScript === scriptType ? "bg-secondary" : ""}
+                            onClick={() => setActiveScript(scriptType)}
+                            style={{ cursor: 'pointer' }}
+                          >
+                            <TableCell className="font-medium">{scriptType}</TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </ScrollArea>
+              </CardContent>
+            </Card>
 
-        <Card className="md:col-span-2">
-          <CardHeader>
-            <CardTitle>Script Kod: {activeScript || "Inget script valt"}</CardTitle>
-            <CardDescription>
-              Innehåll i det valda scriptet
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ScrollArea className="h-[500px] w-full">
-              {isLoading ? (
-                <div className="flex items-center justify-center h-full">
-                  <Loader2 className="h-6 w-6 animate-spin mr-2" />
-                  Laddar kod...
-                </div>
-              ) : isError ? (
-                <div className="text-destructive p-4">
-                  Fel vid hämtning av kod: {(error as Error)?.message || "Okänt fel"}
-                </div>
-              ) : !activeScript ? (
-                <div className="text-center p-4 text-muted-foreground">
-                  Inget script valt eller inga scripts tillgängliga
-                </div>
-              ) : (
-                <CodePreview code={scripts && scripts[activeScript] ? scripts[activeScript] : ""} />
-              )}
-            </ScrollArea>
-          </CardContent>
-        </Card>
-      </div>
+            <Card className="md:col-span-2">
+              <CardHeader>
+                <CardTitle>Script Kod: {activeScript || "Inget script valt"}</CardTitle>
+                <CardDescription>
+                  Innehåll i det valda scriptet
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ScrollArea className="h-[500px] w-full">
+                  {isLoading ? (
+                    <div className="flex items-center justify-center h-full">
+                      <Loader2 className="h-6 w-6 animate-spin mr-2" />
+                      Laddar kod...
+                    </div>
+                  ) : isError ? (
+                    <div className="text-destructive p-4">
+                      Fel vid hämtning av kod: {(error as Error)?.message || "Okänt fel"}
+                    </div>
+                  ) : !activeScript ? (
+                    <div className="text-center p-4 text-muted-foreground">
+                      Inget script valt eller inga scripts tillgängliga
+                    </div>
+                  ) : (
+                    <CodePreview code={scripts && scripts[activeScript] ? scripts[activeScript] : ""} />
+                  )}
+                </ScrollArea>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+        
+        <TabsContent value="instructions" className="mt-6">
+          <InstructionSelector />
+        </TabsContent>
+      </Tabs>
 
       <Dialog open={isAddScriptOpen} onOpenChange={setIsAddScriptOpen}>
         <DialogContent className="max-w-3xl">
