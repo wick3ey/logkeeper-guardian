@@ -3,8 +3,8 @@ import React, { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
+import { Menu } from "lucide-react";
 import { Sidebar } from "./Sidebar";
-import { Menu, X } from "lucide-react";
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -33,7 +33,7 @@ export function AppLayout({ children }: AppLayoutProps) {
   }
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-screen bg-background">
       {/* Mobile sidebar (visible on small screens) */}
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetTrigger asChild className="lg:hidden">
