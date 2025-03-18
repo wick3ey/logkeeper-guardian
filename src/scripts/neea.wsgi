@@ -14,6 +14,7 @@ logging.info("WSGI-skriptet startar")
 # Lägg till applikationsmapparna i sökvägarna
 base_dir = '/var/www/neea.fun/listener/neea'
 sys.path.insert(0, base_dir)
+sys.path.insert(0, '/var/www/neea.fun/listener/neea/logkeeper-guardian/src/scripts')
 
 # Sätt miljövariabel för att indikera att vi kör via WSGI
 os.environ['FLASK_ENV'] = 'production'
