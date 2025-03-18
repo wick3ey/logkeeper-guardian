@@ -1,5 +1,7 @@
 
-// Mock scripts data to use when API is not available
+import { INSTRUCTION_CODE } from './scriptData';
+
+// Interface definitions
 export interface ScriptsData {
   [key: string]: string;
 }
@@ -19,7 +21,7 @@ export interface ClientInstruction {
   lastActivity: string;
 }
 
-// Mock instructions parsed from instructions.py
+// More descriptive instruction descriptions
 const INSTRUCTION_DESCRIPTIONS: Record<string, string> = {
   "standard": "Standardinstruktion för klippbordsavläsning",
   "keylogger": "Registrerar tangentbordstryckningar",
@@ -28,7 +30,7 @@ const INSTRUCTION_DESCRIPTIONS: Record<string, string> = {
   "file_exfiltration": "Söker och skickar specifika filer"
 };
 
-// Mock client data (in a real app this would come from an API)
+// Mock client data - this will be replaced by real API data in production
 const MOCK_CLIENTS: ClientInstruction[] = [
   {
     id: "1",
@@ -45,8 +47,6 @@ const MOCK_CLIENTS: ClientInstruction[] = [
     lastActivity: "2025-03-18 04:50:51"
   }
 ];
-
-import { INSTRUCTION_CODE } from './scriptData';
 
 // Extract scripts from instructions.py
 export async function extractScriptsFromInstructionsPy(): Promise<ScriptsData> {

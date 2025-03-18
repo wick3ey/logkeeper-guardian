@@ -5,16 +5,17 @@ import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from "@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ExternalLink, ArrowUpDown } from "lucide-react";
+import { ExternalLink, ArrowUpDown, RefreshCw } from "lucide-react";
 
 interface Client {
   id: string;
   name: string;
-  os: string;
-  isActive: boolean;
-  lastSeen: string;
+  os?: string;
+  isActive?: boolean;
+  lastSeen?: string;
+  lastActivity?: string;
   instruction: string;
-  system?: string;
+  system: string;
   [key: string]: any; // Allow for additional properties
 }
 
@@ -22,12 +23,13 @@ interface ClientsListProps {
   clients: Client[];
   isLoading: boolean;
   onClientClick: (clientId: string) => void;
+  onRefresh?: () => void;
 }
 
-export function ClientsList({ clients, isLoading, onClientClick }: ClientsListProps) {
+export function ClientsList({ clients, isLoading, onClientClick, onRefresh }: ClientsListProps) {
   // Function to get the appropriate badge variant based on client instruction
   const getInstructionBadge = (instruction: string) => {
-    switch (instruction) {
+    switch (instruction.toLowerCase()) {
       case "keylogger":
         return <Badge variant="outline" className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">Keylogger</Badge>;
       case "screenshot":
@@ -39,6 +41,20 @@ export function ClientsList({ clients, isLoading, onClientClick }: ClientsListPr
       default:
         return <Badge variant="outline" className="bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200">Standard</Badge>;
     }
+  };
+
+  // Check if client is active based on time since last activity 
+  // (if isActive not explicitly set)
+  const isClientActive = (client: Client): boolean => {
+    if (client.isActive !== undefined) return client.isActive;
+    
+    const lastActivityTime = client.lastActivity || client.lastSeen;
+    if (!lastActivityTime) return false;
+    
+    const lastActive = new Date(lastActivityTime);
+    const now = new Date();
+    // Consider active if activity was within the last 30 minutes
+    return (now.getTime() - lastActive.getTime()) < 30 * 60 * 1000;
   };
 
   if (isLoading) {
@@ -81,6 +97,12 @@ export function ClientsList({ clients, isLoading, onClientClick }: ClientsListPr
       <Card>
         <CardContent className="p-6 text-center">
           <p className="text-muted-foreground">Inga klienter hittades</p>
+          {onRefresh && (
+            <Button variant="outline" className="mt-4" onClick={onRefresh}>
+              <RefreshCw className="mr-2 h-4 w-4" />
+              Uppdatera lista
+            </Button>
+          )}
         </CardContent>
       </Card>
     );
@@ -103,31 +125,43 @@ export function ClientsList({ clients, isLoading, onClientClick }: ClientsListPr
                 <TableHead>Status</TableHead>
                 <TableHead>Senaste aktivitet</TableHead>
                 <TableHead>Instruktion</TableHead>
-                <TableHead>Åtgärder</TableHead>
+                <TableHead>
+                  <div className="flex items-center justify-between">
+                    <span>Åtgärder</span>
+                    {onRefresh && (
+                      <Button variant="ghost" size="sm" onClick={onRefresh} title="Uppdatera">
+                        <RefreshCw className="h-3 w-3" />
+                      </Button>
+                    )}
+                  </div>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {clients.map((client) => (
-                <TableRow key={client.id}>
+                <TableRow key={client.id} className="hover:bg-accent/50 cursor-pointer" onClick={() => onClientClick(client.id)}>
                   <TableCell className="font-medium">
-                    {client.name} ({client.system || "Unknown"})
+                    {client.name} {client.system && `(${client.system})`}
                   </TableCell>
-                  <TableCell>{client.os}</TableCell>
+                  <TableCell>{client.os || "Okänd"}</TableCell>
                   <TableCell>
-                    <Badge variant={client.isActive ? "success" : "destructive"}>
-                      {client.isActive ? "Online" : "Offline"}
+                    <Badge variant={isClientActive(client) ? "success" : "destructive"}>
+                      {isClientActive(client) ? "Online" : "Offline"}
                     </Badge>
                   </TableCell>
-                  <TableCell>{client.lastSeen || client.lastActivity}</TableCell>
+                  <TableCell>{client.lastActivity || client.lastSeen || "Okänd"}</TableCell>
                   <TableCell>
-                    {getInstructionBadge(client.instruction)}
+                    {getInstructionBadge(client.instruction || "standard")}
                   </TableCell>
                   <TableCell>
                     <Button 
                       variant="outline" 
                       size="sm" 
                       className="text-primary"
-                      onClick={() => onClientClick(client.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onClientClick(client.id);
+                      }}
                     >
                       <ExternalLink className="h-4 w-4 mr-1" />
                       Detaljer

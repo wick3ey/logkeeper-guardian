@@ -1,25 +1,27 @@
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { Loader2, RefreshCw } from "lucide-react";
 import { InstructionType, ClientInstruction, getInstructionTypes, getClients, updateClientInstruction } from "@/services/scriptsService";
-import { Loader2 } from "lucide-react";
+import { CodePreview } from "./CodePreview";
 
 export function InstructionSelector() {
   const [selectedClient, setSelectedClient] = useState<string>("");
   const [selectedInstruction, setSelectedInstruction] = useState<string>("");
+  const [previewCode, setPreviewCode] = useState<string>("");
   const queryClient = useQueryClient();
 
-  const { data: instructionTypes, isLoading: isLoadingInstructions } = useQuery({
+  const { data: instructionTypes, isLoading: isLoadingInstructions, refetch: refetchInstructions } = useQuery({
     queryKey: ['instructionTypes'],
     queryFn: getInstructionTypes,
   });
 
-  const { data: clients, isLoading: isLoadingClients } = useQuery({
+  const { data: clients, isLoading: isLoadingClients, refetch: refetchClients } = useQuery({
     queryKey: ['clients'],
     queryFn: getClients,
   });
@@ -33,12 +35,27 @@ export function InstructionSelector() {
       toast.success("Klientinstruktion uppdaterad");
       setSelectedClient("");
       setSelectedInstruction("");
+      setPreviewCode("");
     },
     onError: (error: Error) => {
       console.error("Error updating instruction:", error);
       toast.error(`Kunde inte uppdatera instruktion: ${error.message}`);
     },
   });
+
+  // Update preview code when instruction changes
+  useEffect(() => {
+    if (selectedInstruction && instructionTypes) {
+      const instruction = instructionTypes.find(inst => inst.id === selectedInstruction);
+      if (instruction) {
+        setPreviewCode(instruction.code);
+      } else {
+        setPreviewCode("");
+      }
+    } else {
+      setPreviewCode("");
+    }
+  }, [selectedInstruction, instructionTypes]);
 
   const handleUpdateInstruction = () => {
     if (!selectedClient || !selectedInstruction) {
@@ -52,17 +69,28 @@ export function InstructionSelector() {
     });
   };
 
+  const handleRefresh = () => {
+    refetchClients();
+    refetchInstructions();
+    toast.info("Uppdaterar data...");
+  };
+
   // Find the currently selected instruction for description display
   const selectedInstructionData = instructionTypes?.find(inst => inst.id === selectedInstruction);
 
   return (
     <div className="space-y-6">
       <Card>
-        <CardHeader>
-          <CardTitle>Uppdatera klientinstruktioner</CardTitle>
-          <CardDescription>
-            Välj en klient och en instruktion för att ändra klientens beteende.
-          </CardDescription>
+        <CardHeader className="flex flex-row items-center justify-between pb-2">
+          <div>
+            <CardTitle>Uppdatera klientinstruktioner</CardTitle>
+            <CardDescription>
+              Välj en klient och en instruktion för att ändra klientens beteende.
+            </CardDescription>
+          </div>
+          <Button variant="outline" size="icon" onClick={handleRefresh} title="Uppdatera data">
+            <RefreshCw className="h-4 w-4" />
+          </Button>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4">
@@ -84,7 +112,7 @@ export function InstructionSelector() {
                   ) : clients && clients.length > 0 ? (
                     clients.map((client) => (
                       <SelectItem key={client.id} value={client.id}>
-                        {client.name}
+                        {client.name} ({client.system})
                       </SelectItem>
                     ))
                   ) : (
@@ -144,6 +172,15 @@ export function InstructionSelector() {
               )}
             </Button>
           </div>
+
+          {previewCode && (
+            <div className="mt-4 space-y-2">
+              <Label>Förhandsgranskning av kod</Label>
+              <div className="max-h-[300px] overflow-auto">
+                <CodePreview code={previewCode} />
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 

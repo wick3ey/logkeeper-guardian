@@ -1,5 +1,5 @@
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
@@ -13,13 +13,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { CodePreview } from "@/components/scripts/CodePreview";
 import { InstructionSelector } from "@/components/scripts/InstructionSelector";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import { Loader2, RefreshCw } from "lucide-react";
 import { getScripts, ScriptsData } from "@/services/scriptsService";
-
-const fetchScripts = async (): Promise<ScriptsData> => {
-  console.log("Fetching scripts from API...");
-  return getScripts();
-};
 
 export default function Scripts() {
   const [activeScript, setActiveScript] = useState<string>("");
@@ -29,9 +24,9 @@ export default function Scripts() {
   const [activeTab, setActiveTab] = useState("scripts");
   const queryClient = useQueryClient();
 
-  const { data: scripts, isLoading, isError, error } = useQuery({
+  const { data: scripts, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['scripts'],
-    queryFn: fetchScripts,
+    queryFn: getScripts,
     retry: 2,
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
@@ -66,6 +61,11 @@ export default function Scripts() {
     },
   });
 
+  const handleRefresh = () => {
+    refetch();
+    toast.info("Uppdaterar scripts...");
+  };
+
   const handleAddScript = () => {
     if (!newScriptName.trim() || !newScriptContent.trim()) {
       toast.error("Både namn och innehåll krävs");
@@ -80,7 +80,8 @@ export default function Scripts() {
 
   const scriptTypes = scripts ? Object.keys(scripts) : [];
   
-  React.useEffect(() => {
+  // Set initial active script when data loads
+  useEffect(() => {
     if (!activeScript && scriptTypes.length > 0 && !isLoading) {
       setActiveScript(scriptTypes[0]);
     }
@@ -91,6 +92,9 @@ export default function Scripts() {
       <div className="flex items-center justify-between">
         <h2 className="text-3xl font-bold tracking-tight">Scripts</h2>
         <div className="flex gap-2">
+          <Button variant="outline" size="icon" onClick={handleRefresh} title="Uppdatera scripts">
+            <RefreshCw className="h-4 w-4" />
+          </Button>
           <Button onClick={() => setIsAddScriptOpen(true)}>Lägg till script</Button>
         </div>
       </div>
@@ -104,11 +108,13 @@ export default function Scripts() {
         <TabsContent value="scripts" className="mt-6">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <Card className="md:col-span-1">
-              <CardHeader>
-                <CardTitle>Tillgängliga Scripts</CardTitle>
-                <CardDescription>
-                  Välj ett script för att se dess kod
-                </CardDescription>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <div>
+                  <CardTitle>Tillgängliga Scripts</CardTitle>
+                  <CardDescription>
+                    Välj ett script för att se dess kod
+                  </CardDescription>
+                </div>
               </CardHeader>
               <CardContent>
                 <ScrollArea className="h-[500px]">
@@ -144,7 +150,9 @@ export default function Scripts() {
                             onClick={() => setActiveScript(scriptType)}
                             style={{ cursor: 'pointer' }}
                           >
-                            <TableCell className="font-medium">{scriptType}</TableCell>
+                            <TableCell className="font-medium">
+                              {scriptType.charAt(0).toUpperCase() + scriptType.slice(1).replace(/_/g, ' ')}
+                            </TableCell>
                           </TableRow>
                         ))
                       )}
@@ -156,7 +164,11 @@ export default function Scripts() {
 
             <Card className="md:col-span-2">
               <CardHeader>
-                <CardTitle>Script Kod: {activeScript || "Inget script valt"}</CardTitle>
+                <CardTitle>
+                  Script Kod: {activeScript ? 
+                    (activeScript.charAt(0).toUpperCase() + activeScript.slice(1).replace(/_/g, ' ')) : 
+                    "Inget script valt"}
+                </CardTitle>
                 <CardDescription>
                   Innehåll i det valda scriptet
                 </CardDescription>
