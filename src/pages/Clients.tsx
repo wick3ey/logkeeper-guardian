@@ -1,3 +1,4 @@
+
 import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,8 +20,8 @@ const fetchClients = async () => {
     }
     return await response.json();
   } catch (error) {
-    toast.error("Kunde inte hämta klientdata");
-    throw error;
+    console.error("Error fetching clients:", error);
+    return { clients: [] }; // Return empty clients array instead of throwing
   }
 };
 
@@ -30,7 +31,7 @@ export default function Clients() {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ['clients'],
     queryFn: fetchClients,
     placeholderData: { clients: [] }
@@ -67,14 +68,12 @@ export default function Clients() {
     setSelectedClient(null);
   };
 
-  if (error) {
-    console.error("Error loading clients:", error);
-    return <div className="p-6">Fel vid hämtning av klientdata</div>;
-  }
-
   const clients = data?.clients || [];
   const filteredClients = filterClients(clients);
   const selectedClientData = clients.find(client => client.id === selectedClient);
+  
+  const onlineCount = clients.filter(c => c.isActive).length;
+  const offlineCount = clients.filter(c => !c.isActive).length;
   
   return (
     <div className="h-full flex-1 flex-col space-y-8 p-8 md:flex">
@@ -85,10 +84,10 @@ export default function Clients() {
             Totalt: {clients.length}
           </Badge>
           <Badge variant="outline" className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-            Online: {clients.filter(c => c.isActive).length}
+            Online: {onlineCount}
           </Badge>
           <Badge variant="outline" className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">
-            Offline: {clients.filter(c => !c.isActive).length}
+            Offline: {offlineCount}
           </Badge>
         </div>
       </div>
@@ -153,6 +152,13 @@ export default function Clients() {
           </Button>
           {selectedClientData && (
             <ClientDetails client={selectedClientData} />
+          )}
+          {!selectedClientData && (
+            <Card>
+              <CardContent className="p-6">
+                <p className="text-center text-muted-foreground">Klienten kunde inte hittas</p>
+              </CardContent>
+            </Card>
           )}
         </div>
       )}

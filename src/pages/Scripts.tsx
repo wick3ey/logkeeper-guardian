@@ -1,3 +1,4 @@
+
 import React, { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -19,8 +20,8 @@ const fetchScripts = async () => {
     }
     return await response.json();
   } catch (error) {
-    toast.error("Kunde inte hämta scripts");
-    throw error;
+    console.error("Error fetching scripts:", error);
+    return {}; // Return empty object instead of throwing error
   }
 };
 
@@ -31,7 +32,7 @@ export default function Scripts() {
   const [newScriptContent, setNewScriptContent] = useState("");
   const queryClient = useQueryClient();
 
-  const { data: scripts, isLoading, error } = useQuery({
+  const { data: scripts = {}, isLoading } = useQuery({
     queryKey: ['scripts'],
     queryFn: fetchScripts,
     placeholderData: {}
@@ -78,12 +79,7 @@ export default function Scripts() {
     });
   };
 
-  if (error) {
-    console.error("Error loading scripts:", error);
-    return <div className="p-6">Fel vid hämtning av scripts</div>;
-  }
-
-  const scriptTypes = scripts ? Object.keys(scripts) : [];
+  const scriptTypes = Object.keys(scripts || {});
   
   if (!activeScript && scriptTypes.length > 0 && !isLoading) {
     setActiveScript(scriptTypes[0]);
@@ -117,8 +113,12 @@ export default function Scripts() {
                     <TableRow>
                       <TableCell>Laddar scripts...</TableCell>
                     </TableRow>
+                  ) : scriptTypes.length === 0 ? (
+                    <TableRow>
+                      <TableCell>Inga scripts tillgängliga</TableCell>
+                    </TableRow>
                   ) : (
-                    Object.keys(scripts).map((scriptType) => (
+                    scriptTypes.map((scriptType) => (
                       <TableRow 
                         key={scriptType}
                         className={activeScript === scriptType ? "bg-secondary" : ""}
@@ -137,7 +137,7 @@ export default function Scripts() {
 
         <Card className="md:col-span-2">
           <CardHeader>
-            <CardTitle>Script Kod: {activeScript}</CardTitle>
+            <CardTitle>Script Kod: {activeScript || "Inget script valt"}</CardTitle>
             <CardDescription>
               Innehåll i det valda scriptet
             </CardDescription>
@@ -146,6 +146,10 @@ export default function Scripts() {
             <ScrollArea className="h-[500px] w-full">
               {isLoading ? (
                 <div>Laddar kod...</div>
+              ) : !activeScript ? (
+                <div className="text-center p-4 text-muted-foreground">
+                  Inget script valt eller inga scripts tillgängliga
+                </div>
               ) : (
                 <CodePreview code={scripts[activeScript] || ""} />
               )}

@@ -11,6 +11,15 @@ import { Label } from "@/components/ui/label";
 import { X, Download, ArrowLeft, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 
+interface Screenshot {
+  id: number;
+  client: string;
+  clientName: string;
+  timestamp: string;
+  thumbnail: string;
+  fullImage: string;
+}
+
 const fetchScreenshots = async () => {
   try {
     const response = await fetch('/api/screenshots');
@@ -19,8 +28,8 @@ const fetchScreenshots = async () => {
     }
     return await response.json();
   } catch (error) {
-    toast.error("Kunde inte hämta skärmdumpar");
-    throw error;
+    console.error("Error fetching screenshots:", error);
+    return { screenshots: [] };
   }
 };
 
@@ -39,7 +48,7 @@ export default function Screenshots() {
   const screenshots = data?.screenshots || [];
   
   // Filter screenshots based on client and date
-  const filteredScreenshots = screenshots.filter(screenshot => {
+  const filteredScreenshots = screenshots.filter((screenshot: Screenshot) => {
     let passesClientFilter = clientFilter === "all" || screenshot.client === clientFilter;
     
     if (!passesClientFilter) return false;
@@ -103,15 +112,10 @@ export default function Screenshots() {
   };
 
   // Get unique clients for filter
-  const uniqueClients = [...new Set(screenshots.map(s => s.client))];
-
-  if (error) {
-    console.error("Error loading screenshots:", error);
-    return <div className="p-6">Fel vid hämtning av skärmdumpar</div>;
-  }
+  const uniqueClients = [...new Set(screenshots.map((s: Screenshot) => s.client))];
 
   const selectedScreenshotData = selectedScreenshot !== null 
-    ? screenshots.find(s => s.id === selectedScreenshot) 
+    ? screenshots.find((s: Screenshot) => s.id === selectedScreenshot) 
     : null;
 
   return (
@@ -135,7 +139,7 @@ export default function Screenshots() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Alla klienter</SelectItem>
-              {uniqueClients.map(client => (
+              {uniqueClients.map((client: string) => (
                 <SelectItem key={client} value={client}>{client}</SelectItem>
               ))}
             </SelectContent>
@@ -181,7 +185,7 @@ export default function Screenshots() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {filteredScreenshots.map((screenshot) => (
+              {filteredScreenshots.map((screenshot: Screenshot) => (
                 <div 
                   key={screenshot.id} 
                   className="relative group cursor-pointer overflow-hidden rounded-md"

@@ -1,3 +1,4 @@
+
 import React, { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -14,24 +15,36 @@ interface ScreenshotsTabProps {
   client: any;
 }
 
+interface Screenshot {
+  id: number;
+  timestamp: string;
+  thumbnail: string;
+  fullImage: string;
+}
+
 export function ScreenshotsTab({ client }: ScreenshotsTabProps) {
   const [selectedScreenshot, setSelectedScreenshot] = useState<number | null>(null);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [sortOrder, setSortOrder] = useState("newest");
 
   // Fetch screenshots for this client
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ['clients', client.id, 'screenshots'],
     queryFn: async () => {
-      const response = await fetch(`/api/clients/${client.id}/screenshots`);
-      if (!response.ok) {
-        throw new Error('Failed to fetch screenshots');
+      try {
+        const response = await fetch(`/api/clients/${client.id}/screenshots`);
+        if (!response.ok) {
+          throw new Error('Failed to fetch screenshots');
+        }
+        return response.json();
+      } catch (error) {
+        console.error("Error fetching screenshots:", error);
+        return { screenshots: [] };
       }
-      return response.json();
     }
   });
 
-  const screenshots = data?.screenshots || [];
+  const screenshots: Screenshot[] = data?.screenshots || [];
 
   // Sort screenshots based on sortOrder
   const sortedScreenshots = [...screenshots].sort((a, b) => {
@@ -86,10 +99,6 @@ export function ScreenshotsTab({ client }: ScreenshotsTabProps) {
     ? screenshots.find(s => s.id === selectedScreenshot) 
     : null;
 
-  if (error) {
-    return <div className="text-center py-12 text-red-500">Det gick inte att hämta skärmdumpar</div>;
-  }
-
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -117,7 +126,13 @@ export function ScreenshotsTab({ client }: ScreenshotsTabProps) {
         </CardHeader>
         <CardContent>
           <ScrollArea className="h-[500px]">
-            {sortedScreenshots.length === 0 ? (
+            {isLoading ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <Skeleton key={i} className="aspect-video w-full rounded-md" />
+                ))}
+              </div>
+            ) : sortedScreenshots.length === 0 ? (
               <div className="text-center py-12">
                 <p className="text-muted-foreground">Inga skärmdumpar tillgängliga för denna klient</p>
               </div>
