@@ -1,3 +1,4 @@
+
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
@@ -10,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { SearchIcon } from "lucide-react";
 import { toast } from "sonner";
-import { getClients, updateClientInstruction } from "@/services/scriptsService";
+import { getClients, updateClientInstruction, ClientInstruction } from "@/services/scriptsService";
 import { AppLayout } from "@/components/layout/AppLayout";
 
 interface FormattedClient {
@@ -55,8 +56,8 @@ export default function Clients() {
           privateIp: client.privateIp || client.private_ip || 'Unknown',
           firstSeen: client.firstSeen || client.first_seen || 'Unknown',
           lastSeen: client.lastActivity || client.last_activity || client.lastSeen || 'Unknown',
-          isActive: client.isActive === true || (client.last_activity && 
-            (new Date().getTime() - new Date(client.last_activity).getTime()) < 30 * 60 * 1000),
+          isActive: client.isActive === true || (client.lastActivity && 
+            (new Date().getTime() - new Date(client.lastActivity).getTime()) < 30 * 60 * 1000),
           instruction: client.instruction || client.currentInstruction || 'standard',
           system: client.system || 'Unknown'
         }));

@@ -1,4 +1,3 @@
-
 import { INSTRUCTION_CODE } from './scriptData';
 
 // Interface definitions
@@ -17,8 +16,19 @@ export interface ClientInstruction {
   id: string;
   name: string;
   system: string;
-  currentInstruction: string;
-  lastActivity: string;
+  currentInstruction?: string;
+  instruction?: string;
+  lastActivity?: string;
+  last_activity?: string;
+  lastSeen?: string;
+  isActive?: boolean;
+  ip?: string;
+  public_ip?: string;
+  privateIp?: string;
+  private_ip?: string;
+  firstSeen?: string;
+  first_seen?: string;
+  [key: string]: any;
 }
 
 // More descriptive instruction descriptions
