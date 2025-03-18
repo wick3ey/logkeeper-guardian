@@ -1,4 +1,3 @@
-
 #!/usr/bin/python
 import os
 import sys
@@ -11,10 +10,17 @@ import traceback
 import marshal
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, render_template, redirect, url_for, session, send_file
-from flask_cors import CORS
 import zipfile
 from io import BytesIO
 import textwrap
+
+# Försök importera CORS, men fortsätt även om det misslyckas
+try:
+    from flask_cors import CORS
+    has_cors = True
+except ImportError:
+    has_cors = False
+    print("Warning: flask_cors not found. Cross-origin requests will be blocked.")
 
 # Import instructions for clients
 from instructions import INSTRUCTIONS
@@ -40,7 +46,12 @@ app = Flask(__name__,
             static_url_path='/static', 
             static_folder=STATIC_DIRECTORY,
             template_folder=TEMPLATES_DIRECTORY)
-CORS(app)
+
+# Apply CORS only if available
+if has_cors:
+    CORS(app)
+else:
+    logging.warning("flask_cors not available - CORS support disabled")
 
 # Session key for Flask
 app.secret_key = os.urandom(24)
@@ -478,7 +489,23 @@ def get_config():
         
         return jsonify(error_response), 500
 
-# ... keep existing code (static files installation functionality)
+# Serve static files for the frontend
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve_static(path):
+    if path == "" or path == "/" or not os.path.exists(os.path.join(STATIC_DIRECTORY, path)):
+        return send_file(os.path.join(STATIC_DIRECTORY, 'index.html'))
+    return send_file(os.path.join(STATIC_DIRECTORY, path))
+
+# Create necessary directories
+@app.before_first_request
+def create_directories():
+    """Ensure all required directories exist."""
+    os.makedirs(LOG_DIRECTORY, exist_ok=True)
+    os.makedirs(CLIENT_LOGS_DIRECTORY, exist_ok=True)
+    os.makedirs(CONFIG_DIRECTORY, exist_ok=True)
+    os.makedirs(STATIC_DIRECTORY, exist_ok=True)
+    os.makedirs(TEMPLATES_DIRECTORY, exist_ok=True)
 
 # Run the server directly instead of using mod_wsgi
 if __name__ == "__main__":
@@ -486,6 +513,8 @@ if __name__ == "__main__":
     os.makedirs(LOG_DIRECTORY, exist_ok=True)
     os.makedirs(CLIENT_LOGS_DIRECTORY, exist_ok=True)
     os.makedirs(CONFIG_DIRECTORY, exist_ok=True)
+    os.makedirs(STATIC_DIRECTORY, exist_ok=True)
+    os.makedirs(TEMPLATES_DIRECTORY, exist_ok=True)
     
     # Log startup information
     logging.info("Starting NEEA server...")
