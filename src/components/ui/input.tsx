@@ -1,9 +1,15 @@
+
 import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
-const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
-  ({ className, type, ...props }, ref) => {
+export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
+  showTokenToggle?: boolean;
+  onToggleToken?: () => void;
+}
+
+const Input = React.forwardRef<HTMLInputElement, InputProps>(
+  ({ className, type, showTokenToggle, onToggleToken, ...props }, ref) => {
     return (
       <input
         type={type}
