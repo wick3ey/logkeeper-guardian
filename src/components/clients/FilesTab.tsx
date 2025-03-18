@@ -1,9 +1,8 @@
-
 import React, { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Download, FileIcon, File, FileText, FileImage, FilePdf } from "lucide-react";
+import { Download, FileIcon, File, FileText, FileImage, FilePdf as FileDocumentIcon } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -20,7 +19,6 @@ export function FilesTab({ client }: FilesTabProps) {
   const [selectedFile, setSelectedFile] = useState<any | null>(null);
   const [fileContentOpen, setFileContentOpen] = useState(false);
 
-  // Mock data for development - in a real implementation, this would come from an API call
   const mockFiles = [
     {
       id: 1,
@@ -88,14 +86,12 @@ export function FilesTab({ client }: FilesTabProps) {
     }
   ];
 
-  // Sort files based on sortOrder
   const sortedFiles = [...mockFiles].sort((a, b) => {
     const dateA = new Date(a.modified).getTime();
     const dateB = new Date(b.modified).getTime();
     return sortOrder === "newest" ? dateB - dateA : dateA - dateB;
   });
 
-  // Mock file content for text files
   const getFileContent = (file: any) => {
     if (file.type === "text") {
       if (file.name === "passwords.txt") {
@@ -136,7 +132,6 @@ VPN Connection,Automatic,2023-03-15`;
     return "Binary file content cannot be displayed.";
   };
 
-  // Function to get the appropriate icon based on file type
   const getFileIcon = (type: string) => {
     switch (type) {
       case "text":
@@ -144,7 +139,7 @@ VPN Connection,Automatic,2023-03-15`;
       case "image":
         return <FileImage className="h-5 w-5" />;
       case "pdf":
-        return <FilePdf className="h-5 w-5" />;
+        return <FileDocumentIcon className="h-5 w-5" />;
       case "certificate":
         return <File className="h-5 w-5" />;
       default:
@@ -190,7 +185,6 @@ VPN Connection,Automatic,2023-03-15`;
           <TabsTrigger value="certificates">Certifikat</TabsTrigger>
         </TabsList>
         
-        {/* All Files Tab */}
         <TabsContent value="all">
           <Card>
             <CardHeader>
@@ -258,7 +252,6 @@ VPN Connection,Automatic,2023-03-15`;
           </Card>
         </TabsContent>
         
-        {/* Text Files Tab */}
         <TabsContent value="text">
           <Card>
             <CardHeader>
@@ -322,7 +315,6 @@ VPN Connection,Automatic,2023-03-15`;
           </Card>
         </TabsContent>
         
-        {/* Documents Tab */}
         <TabsContent value="documents">
           <Card>
             <CardHeader>
@@ -379,7 +371,6 @@ VPN Connection,Automatic,2023-03-15`;
           </Card>
         </TabsContent>
         
-        {/* Media Tab */}
         <TabsContent value="media">
           <Card>
             <CardHeader>
@@ -434,7 +425,6 @@ VPN Connection,Automatic,2023-03-15`;
           </Card>
         </TabsContent>
         
-        {/* Certificates Tab */}
         <TabsContent value="certificates">
           <Card>
             <CardHeader>
@@ -490,7 +480,6 @@ VPN Connection,Automatic,2023-03-15`;
         </TabsContent>
       </Tabs>
 
-      {/* File Content Dialog */}
       <Dialog open={fileContentOpen} onOpenChange={setFileContentOpen}>
         <DialogContent className="max-w-3xl">
           <DialogHeader>
