@@ -15,7 +15,7 @@ interface Client {
   lastSeen?: string;
   lastActivity?: string;
   instruction: string;
-  system: string;
+  system: string; // Required by this component
   [key: string]: any; // Allow for additional properties
 }
 

