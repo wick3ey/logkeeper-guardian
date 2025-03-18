@@ -10,15 +10,16 @@ import { ExternalLink, ArrowUpDown } from "lucide-react";
 interface Client {
   id: string;
   name: string;
-  system: string;
   os: string;
   isActive: boolean;
-  lastActivity: string;
+  lastSeen: string;
   instruction: string;
+  system?: string;
+  [key: string]: any; // Allow for additional properties
 }
 
 interface ClientsListProps {
-  clients: any[];
+  clients: Client[];
   isLoading: boolean;
   onClientClick: (clientId: string) => void;
 }
@@ -109,7 +110,7 @@ export function ClientsList({ clients, isLoading, onClientClick }: ClientsListPr
               {clients.map((client) => (
                 <TableRow key={client.id}>
                   <TableCell className="font-medium">
-                    {client.name} ({client.system})
+                    {client.name} ({client.system || "Unknown"})
                   </TableCell>
                   <TableCell>{client.os}</TableCell>
                   <TableCell>
@@ -117,7 +118,7 @@ export function ClientsList({ clients, isLoading, onClientClick }: ClientsListPr
                       {client.isActive ? "Online" : "Offline"}
                     </Badge>
                   </TableCell>
-                  <TableCell>{client.lastActivity}</TableCell>
+                  <TableCell>{client.lastSeen || client.lastActivity}</TableCell>
                   <TableCell>
                     {getInstructionBadge(client.instruction)}
                   </TableCell>

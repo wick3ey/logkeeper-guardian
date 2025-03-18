@@ -12,7 +12,34 @@ import { Input } from "@/components/ui/input";
 import { SearchIcon } from "lucide-react";
 import { toast } from "sonner";
 
-const fetchClients = async () => {
+// Define TypeScript interface for client data
+interface ClientData {
+  username?: string;
+  system?: string;
+  public_ip?: string;
+  private_ip?: string;
+  first_seen?: string;
+  last_activity?: string;
+  is_active?: boolean;
+  instruction?: string;
+  [key: string]: any; // Allow for additional properties
+}
+
+// Define TypeScript interface for formatted client
+interface FormattedClient {
+  id: string;
+  name: string;
+  os: string;
+  ip: string;
+  privateIp: string;
+  firstSeen: string;
+  lastSeen: string;
+  isActive: boolean;
+  instruction: string;
+  [key: string]: any; // Allow for additional properties
+}
+
+const fetchClients = async (): Promise<{ clients: FormattedClient[] }> => {
   try {
     // Försök att hämta klienter från server.py
     const response = await fetch('/api/get_clients');
@@ -31,18 +58,21 @@ const fetchClients = async () => {
     }
     
     // Formatera klienter till rätt format
-    const formattedClients = Object.entries(result.clients || {}).map(([id, clientData]) => ({
-      id,
-      name: clientData.username || 'Okänd',
-      os: clientData.system || 'Okänt',
-      ip: clientData.public_ip || 'Okänd',
-      privateIp: clientData.private_ip || 'Okänd',
-      firstSeen: clientData.first_seen || 'Okänd',
-      lastSeen: clientData.last_activity || 'Okänd',
-      isActive: clientData.is_active === true,
-      instruction: clientData.instruction || 'standard',
-      ...clientData  // Include all other properties
-    }));
+    const formattedClients = Object.entries(result.clients || {}).map(([id, clientData]) => {
+      const typedClientData = clientData as ClientData;
+      return {
+        id,
+        name: typedClientData.username || 'Okänd',
+        os: typedClientData.system || 'Okänt',
+        ip: typedClientData.public_ip || 'Okänd',
+        privateIp: typedClientData.private_ip || 'Okänd',
+        firstSeen: typedClientData.first_seen || 'Okänd',
+        lastSeen: typedClientData.last_activity || 'Okänd',
+        isActive: typedClientData.is_active === true,
+        instruction: typedClientData.instruction || 'standard',
+        ...typedClientData  // Include all other properties (now safely typed)
+      };
+    });
     
     return { clients: formattedClients };
   } catch (error) {
@@ -55,7 +85,7 @@ const fetchClients = async () => {
 };
 
 // Generera fallback-klienter för att hålla UI funktionell även utan server
-function generateFallbackClients() {
+function generateFallbackClients(): FormattedClient[] {
   return [
     {
       id: "john_doe",
@@ -94,7 +124,7 @@ function generateFallbackClients() {
 }
 
 // API-funktion för att pinga en klient
-const pingClient = async (clientId) => {
+const pingClient = async (clientId: string) => {
   try {
     const response = await fetch('/api/ping_client', {
       method: 'POST',
@@ -117,7 +147,7 @@ const pingClient = async (clientId) => {
 };
 
 // API-funktion för att rensa loggar för en klient
-const clearClientLogs = async (clientId) => {
+const clearClientLogs = async (clientId: string) => {
   try {
     const response = await fetch('/api/clear_logs', {
       method: 'POST',
@@ -140,7 +170,7 @@ const clearClientLogs = async (clientId) => {
 };
 
 // API-funktion för att uppdatera instruktion för en klient
-const updateClientInstruction = async (clientId, instruction) => {
+const updateClientInstruction = async (clientId: string, instruction: string) => {
   try {
     const response = await fetch('/api/update_instruction', {
       method: 'POST',
@@ -167,7 +197,7 @@ const updateClientInstruction = async (clientId, instruction) => {
 
 export default function Clients() {
   const [activeTab, setActiveTab] = useState("all");
-  const [selectedClient, setSelectedClient] = useState(null);
+  const [selectedClient, setSelectedClient] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -191,7 +221,7 @@ export default function Clients() {
     }
   };
 
-  const handlePingClient = async (clientId) => {
+  const handlePingClient = async (clientId: string) => {
     try {
       const result = await pingClient(clientId);
       if (result.status === "success") {
@@ -201,11 +231,12 @@ export default function Clients() {
         toast.error(`Fel vid ping av klient: ${result.message}`);
       }
     } catch (error) {
-      toast.error(`Fel vid ping av klient: ${error.message}`);
+      const errorMessage = error instanceof Error ? error.message : "Okänt fel";
+      toast.error(`Fel vid ping av klient: ${errorMessage}`);
     }
   };
 
-  const handleClearLogs = async (clientId) => {
+  const handleClearLogs = async (clientId: string) => {
     if (window.confirm(`Är du säker på att du vill rensa loggarna för klient ${clientId}?`)) {
       try {
         const result = await clearClientLogs(clientId);
@@ -215,12 +246,13 @@ export default function Clients() {
           toast.error(`Fel vid rensning av loggar: ${result.message}`);
         }
       } catch (error) {
-        toast.error(`Fel vid rensning av loggar: ${error.message}`);
+        const errorMessage = error instanceof Error ? error.message : "Okänt fel";
+        toast.error(`Fel vid rensning av loggar: ${errorMessage}`);
       }
     }
   };
 
-  const handleUpdateInstruction = async (clientId, instruction) => {
+  const handleUpdateInstruction = async (clientId: string, instruction: string) => {
     try {
       const result = await updateClientInstruction(clientId, instruction);
       if (result.status === "success") {
@@ -230,11 +262,12 @@ export default function Clients() {
         toast.error(`Fel vid uppdatering av instruktion: ${result.message}`);
       }
     } catch (error) {
-      toast.error(`Fel vid uppdatering av instruktion: ${error.message}`);
+      const errorMessage = error instanceof Error ? error.message : "Okänt fel";
+      toast.error(`Fel vid uppdatering av instruktion: ${errorMessage}`);
     }
   };
 
-  const filterClients = (clients) => {
+  const filterClients = (clients: FormattedClient[]) => {
     let filtered = [...clients];
     
     // Filter by search term
@@ -257,7 +290,7 @@ export default function Clients() {
     return filtered;
   };
 
-  const handleClientClick = (clientId) => {
+  const handleClientClick = (clientId: string) => {
     setSelectedClient(clientId);
   };
 
