@@ -7,31 +7,22 @@ import { RecentActivityWidget } from "@/components/dashboard/RecentActivityWidge
 import { StorageWidget } from "@/components/dashboard/StorageWidget";
 import { ActivityChart } from "@/components/dashboard/ActivityChart";
 import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 
 const Index = () => {
-  // Mock data for development purposes
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ['dashboardData'],
     queryFn: async () => {
-      // In a real app, this would be an API call
-      return {
-        totalClients: 8,
-        activeClients: 5,
-        storageUsed: "32.5 MB",
-        recentActivities: [
-          { id: 1, client: "john_laptop", type: "keystrokes", timestamp: "2023-03-21 14:35:22" },
-          { id: 2, client: "emma_desktop", type: "screenshot", timestamp: "2023-03-21 14:30:15" },
-          { id: 3, client: "david_pc", type: "clipboard", timestamp: "2023-03-21 14:28:10" }
-        ],
-        activityData: [
-          { name: "00:00", keystrokes: 20, screenshots: 5, clipboard: 8 },
-          { name: "04:00", keystrokes: 0, screenshots: 5, clipboard: 0 },
-          { name: "08:00", keystrokes: 120, screenshots: 15, clipboard: 30 },
-          { name: "12:00", keystrokes: 200, screenshots: 20, clipboard: 45 },
-          { name: "16:00", keystrokes: 180, screenshots: 25, clipboard: 38 },
-          { name: "20:00", keystrokes: 100, screenshots: 15, clipboard: 25 }
-        ]
-      };
+      try {
+        const response = await fetch('/api/dashboard');
+        if (!response.ok) {
+          throw new Error('Server responded with an error');
+        }
+        return await response.json();
+      } catch (err) {
+        toast.error("Kunde inte hämta dashboard-data");
+        throw err;
+      }
     },
     placeholderData: {
       totalClients: 0,
@@ -41,6 +32,10 @@ const Index = () => {
       activityData: []
     }
   });
+
+  if (error) {
+    console.error("Error fetching dashboard data:", error);
+  }
 
   return (
     <AppLayout>

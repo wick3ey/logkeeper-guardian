@@ -1,4 +1,3 @@
-
 import React, { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -7,6 +6,9 @@ import { Download, X, ArrowLeft, ArrowRight } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface ScreenshotsTabProps {
   client: any;
@@ -17,16 +19,22 @@ export function ScreenshotsTab({ client }: ScreenshotsTabProps) {
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [sortOrder, setSortOrder] = useState("newest");
 
-  // Mock data for development - in a real implementation, this would come from an API call
-  const mockScreenshots = Array.from({ length: 8 }).map((_, i) => ({
-    id: i,
-    timestamp: new Date(Date.now() - i * 3600000).toISOString().replace('T', ' ').substring(0, 19),
-    thumbnail: `https://picsum.photos/seed/${client.id}-${i}/300/200`, // Placeholder image
-    fullImage: `https://picsum.photos/seed/${client.id}-${i}/1920/1080`, // Placeholder full image
-  }));
+  // Fetch screenshots for this client
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['clients', client.id, 'screenshots'],
+    queryFn: async () => {
+      const response = await fetch(`/api/clients/${client.id}/screenshots`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch screenshots');
+      }
+      return response.json();
+    }
+  });
+
+  const screenshots = data?.screenshots || [];
 
   // Sort screenshots based on sortOrder
-  const sortedScreenshots = [...mockScreenshots].sort((a, b) => {
+  const sortedScreenshots = [...screenshots].sort((a, b) => {
     const dateA = new Date(a.timestamp).getTime();
     const dateB = new Date(b.timestamp).getTime();
     return sortOrder === "newest" ? dateB - dateA : dateA - dateB;
@@ -37,10 +45,29 @@ export function ScreenshotsTab({ client }: ScreenshotsTabProps) {
     setLightboxOpen(true);
   };
 
-  const handleDownload = (id: number) => {
-    console.log(`Downloading screenshot ${id}`);
-    // In a real implementation, use API to download
-    // window.open(`/api/download_screenshot/${id}`, '_blank');
+  const handleDownload = async (id: number) => {
+    try {
+      const response = await fetch(`/api/clients/${client.id}/screenshots/${id}/download`);
+      if (!response.ok) {
+        throw new Error('Failed to download screenshot');
+      }
+      
+      // Create a download link
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `screenshot_${client.id}_${id}.png`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      toast.success("Nedladdning startad");
+    } catch (error) {
+      console.error("Error downloading screenshot:", error);
+      toast.error("Kunde inte ladda ner skärmdump");
+    }
   };
 
   const handlePrevious = () => {
@@ -50,14 +77,18 @@ export function ScreenshotsTab({ client }: ScreenshotsTabProps) {
   };
 
   const handleNext = () => {
-    if (selectedScreenshot !== null && selectedScreenshot < mockScreenshots.length - 1) {
+    if (selectedScreenshot !== null && selectedScreenshot < screenshots.length - 1) {
       setSelectedScreenshot(selectedScreenshot + 1);
     }
   };
 
   const selectedScreenshotData = selectedScreenshot !== null 
-    ? mockScreenshots.find(s => s.id === selectedScreenshot) 
+    ? screenshots.find(s => s.id === selectedScreenshot) 
     : null;
+
+  if (error) {
+    return <div className="text-center py-12 text-red-500">Det gick inte att hämta skärmdumpar</div>;
+  }
 
   return (
     <div className="space-y-6">
@@ -181,7 +212,7 @@ export function ScreenshotsTab({ client }: ScreenshotsTabProps) {
                     size="icon" 
                     className="mr-2 rounded-full bg-black/20 text-white hover:bg-black/40"
                     onClick={handleNext}
-                    disabled={selectedScreenshot === mockScreenshots.length - 1}
+                    disabled={selectedScreenshot === screenshots.length - 1}
                   >
                     <ArrowRight className="h-4 w-4" />
                   </Button>

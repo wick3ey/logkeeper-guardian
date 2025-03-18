@@ -2,29 +2,26 @@
 import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { X, Download, ArrowLeft, ArrowRight } from "lucide-react";
+import { toast } from "sonner";
 
 const fetchScreenshots = async () => {
-  // In a real implementation, fetch from server
-  // return await fetch('/api/screenshots').then(res => res.json());
-  
-  // Mocked data for development
-  return {
-    screenshots: Array.from({ length: 15 }).map((_, i) => ({
-      id: i,
-      client: `client_${i % 5 + 1}`,
-      clientName: `Client ${i % 5 + 1}`,
-      timestamp: new Date(Date.now() - i * 3600000).toISOString().replace('T', ' ').substring(0, 19),
-      thumbnail: `https://picsum.photos/seed/${i}/300/200`, // Placeholder image
-      fullImage: `https://picsum.photos/seed/${i}/1920/1080`, // Placeholder full image
-    }))
-  };
+  try {
+    const response = await fetch('/api/screenshots');
+    if (!response.ok) {
+      throw new Error('Failed to fetch screenshots');
+    }
+    return await response.json();
+  } catch (error) {
+    toast.error("Kunde inte hämta skärmdumpar");
+    throw error;
+  }
 };
 
 export default function Screenshots() {
@@ -35,7 +32,8 @@ export default function Screenshots() {
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['screenshots'],
-    queryFn: fetchScreenshots
+    queryFn: fetchScreenshots,
+    placeholderData: { screenshots: [] }
   });
 
   const screenshots = data?.screenshots || [];
@@ -67,10 +65,29 @@ export default function Screenshots() {
     setLightboxOpen(true);
   };
 
-  const handleDownload = (id: number) => {
-    console.log(`Downloading screenshot ${id}`);
-    // In a real implementation, use API to download
-    // window.open(`/api/download_screenshot/${id}`, '_blank');
+  const handleDownload = async (id: number) => {
+    try {
+      const response = await fetch(`/api/download_screenshot/${id}`);
+      if (!response.ok) {
+        throw new Error('Failed to download screenshot');
+      }
+      
+      // Create a download link
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `screenshot_${id}.png`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      toast.success("Nedladdning startad");
+    } catch (error) {
+      console.error("Error downloading screenshot:", error);
+      toast.error("Kunde inte ladda ner skärmdump");
+    }
   };
 
   const handlePrevious = () => {
@@ -89,7 +106,8 @@ export default function Screenshots() {
   const uniqueClients = [...new Set(screenshots.map(s => s.client))];
 
   if (error) {
-    return <div className="p-6">Error loading screenshots: {error.message}</div>;
+    console.error("Error loading screenshots:", error);
+    return <div className="p-6">Fel vid hämtning av skärmdumpar</div>;
   }
 
   const selectedScreenshotData = selectedScreenshot !== null 
