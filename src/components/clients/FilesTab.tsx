@@ -1,15 +1,17 @@
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Download, FileIcon, File, FileText, FileImage, FileType } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { Loader2 } from "lucide-react";
 
 interface FilesTabProps {
   client: any;
@@ -19,115 +21,53 @@ export function FilesTab({ client }: FilesTabProps) {
   const [sortOrder, setSortOrder] = useState("newest");
   const [selectedFile, setSelectedFile] = useState<any | null>(null);
   const [fileContentOpen, setFileContentOpen] = useState(false);
+  
+  // Fetch real files from the API
+  const { data: files, isLoading, error } = useQuery({
+    queryKey: ['clientFiles', client.id],
+    queryFn: async () => {
+      try {
+        const response = await fetch(`/api/clients/${client.id}/files`);
+        if (!response.ok) {
+          throw new Error(`Error fetching files: ${response.status}`);
+        }
+        return await response.json();
+      } catch (error) {
+        console.error("Error fetching files:", error);
+        throw error;
+      }
+    },
+    retry: 1,
+    staleTime: 60000 // 1 minute
+  });
 
-  const mockFiles = [
-    {
-      id: 1,
-      name: "meeting_notes.txt",
-      path: "C:/Users/John/Documents/meeting_notes.txt",
-      size: "12.5 KB",
-      modified: "2023-03-21 14:35:22",
-      type: "text"
-    },
-    {
-      id: 2,
-      name: "presentation.pptx",
-      path: "C:/Users/John/Documents/presentation.pptx",
-      size: "2.3 MB",
-      modified: "2023-03-21 14:30:15",
-      type: "presentation"
-    },
-    {
-      id: 3,
-      name: "budget_2023.xlsx",
-      path: "C:/Users/John/Documents/budget_2023.xlsx",
-      size: "456 KB",
-      modified: "2023-03-21 14:28:10",
-      type: "spreadsheet"
-    },
-    {
-      id: 4,
-      name: "report.pdf",
-      path: "C:/Users/John/Documents/report.pdf",
-      size: "1.2 MB",
-      modified: "2023-03-21 14:25:05",
-      type: "pdf"
-    },
-    {
-      id: 5,
-      name: "scan.jpg",
-      path: "C:/Users/John/Pictures/scan.jpg",
-      size: "720 KB",
-      modified: "2023-03-21 14:20:05",
-      type: "image"
-    },
-    {
-      id: 6,
-      name: "passwords.txt",
-      path: "C:/Users/John/Documents/passwords.txt",
-      size: "2 KB",
-      modified: "2023-03-21 14:15:48",
-      type: "text"
-    },
-    {
-      id: 7,
-      name: "certificate.key",
-      path: "C:/Users/John/Downloads/certificate.key",
-      size: "4 KB",
-      modified: "2023-03-21 14:10:15",
-      type: "certificate"
-    },
-    {
-      id: 8,
-      name: "system_config.csv",
-      path: "C:/Users/John/Downloads/system_config.csv",
-      size: "32 KB",
-      modified: "2023-03-21 14:05:30",
-      type: "text"
+  // Use real data or empty array
+  const fileList = files || [];
+  
+  useEffect(() => {
+    if (error) {
+      toast.error("Kunde inte hämta filer för klienten");
     }
-  ];
+  }, [error]);
 
-  const sortedFiles = [...mockFiles].sort((a, b) => {
+  const sortedFiles = fileList.sort((a, b) => {
     const dateA = new Date(a.modified).getTime();
     const dateB = new Date(b.modified).getTime();
     return sortOrder === "newest" ? dateB - dateA : dateA - dateB;
   });
 
-  const getFileContent = (file: any) => {
+  const getFileContent = async (file) => {
     if (file.type === "text") {
-      if (file.name === "passwords.txt") {
-        return `Facebook: user123:password123
-Gmail: john.smith@gmail.com:SecurePass456!
-Amazon: jsmith:amazonShopper789
-Netflix: john_smith:netflixAndChill2023
-Bank: *****:******* (stored in LastPass)
-Work VPN: jsmith:C0mpany$ecure`;
-      } else if (file.name === "meeting_notes.txt") {
-        return `Meeting Notes - March 21, 2023
-Attendees: John Smith, Sarah Lee, Mark Johnson
-
-Agenda:
-1. Q1 Financial Review
-2. New Product Launch Timeline
-3. Marketing Strategy
-
-Action Items:
-- John: Prepare Q1 report by Friday
-- Sarah: Contact vendors for product launch
-- Mark: Revise marketing budget
-
-Next Meeting: March 28, 2023 at 10:00 AM`;
-      } else if (file.name === "system_config.csv") {
-        return `Setting,Value,Last Updated
-CPU Power Management,Balanced,2023-03-15
-Sleep Timeout,30 minutes,2023-03-15
-Display Timeout,15 minutes,2023-03-15
-Starting Location,C:/Users/John,2023-03-15
-Default Browser,Chrome,2023-03-15
-Automatic Updates,Enabled,2023-03-15
-Firewall Status,Enabled,2023-03-15
-Backup Schedule,Daily at 22:00,2023-03-15
-VPN Connection,Automatic,2023-03-15`;
+      try {
+        // For text files, fetch the actual content
+        const response = await fetch(`/api/clients/${client.id}/files/${file.id}/content`);
+        if (!response.ok) throw new Error("Could not fetch file content");
+        
+        const content = await response.text();
+        return content;
+      } catch (error) {
+        console.error("Error fetching file content:", error);
+        return "Error loading file content.";
       }
     }
     return "Binary file content cannot be displayed.";
@@ -140,7 +80,7 @@ VPN Connection,Automatic,2023-03-15`;
       case "image":
         return <FileImage className="h-5 w-5" />;
       case "pdf":
-        return <FileType className="h-5 w-5" />; // Changed from FilePdf to FileType
+        return <FileType className="h-5 w-5" />;
       case "certificate":
         return <File className="h-5 w-5" />;
       default:
@@ -148,15 +88,40 @@ VPN Connection,Automatic,2023-03-15`;
     }
   };
 
-  const handleViewFile = (file: any) => {
-    setSelectedFile(file);
+  const handleViewFile = async (file) => {
+    setSelectedFile({
+      ...file,
+      content: "Loading content..."
+    });
     setFileContentOpen(true);
+    
+    // Fetch actual content for text files
+    if (file.type === "text") {
+      const content = await getFileContent(file);
+      setSelectedFile(prev => ({
+        ...prev,
+        content
+      }));
+    }
   };
 
-  const handleDownloadFile = (id: number) => {
-    console.log(`Downloading file with ID ${id}`);
-    // In a real implementation, use API to download
-    // window.open(`/api/download_file/${id}`, '_blank');
+  const handleDownloadFile = (id) => {
+    // Real file download
+    window.open(`/api/clients/${client.id}/files/${id}/download`, '_blank');
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center p-12">
+        <Loader2 className="h-8 w-8 animate-spin mb-4" />
+        <p>Laddar filer...</p>
+      </div>
+    );
+  }
+
+  // Filter functions for tabs
+  const filterByTypes = (files, types) => {
+    return files.filter(file => types.includes(file.type));
   };
 
   return (
@@ -274,14 +239,14 @@ VPN Connection,Automatic,2023-03-15`;
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {sortedFiles.filter(file => file.type === "text").length === 0 ? (
+                    {filterByTypes(sortedFiles, ["text"]).length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={5} className="text-center h-24">
                           Inga textfiler hittades
                         </TableCell>
                       </TableRow>
                     ) : (
-                      sortedFiles.filter(file => file.type === "text").map((file) => (
+                      filterByTypes(sortedFiles, ["text"]).map((file) => (
                         <TableRow key={file.id}>
                           <TableCell className="font-medium">{file.name}</TableCell>
                           <TableCell className="text-sm text-muted-foreground">{file.path}</TableCell>
@@ -338,14 +303,14 @@ VPN Connection,Automatic,2023-03-15`;
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {sortedFiles.filter(file => ["pdf", "presentation", "spreadsheet"].includes(file.type)).length === 0 ? (
+                    {filterByTypes(sortedFiles, ["pdf", "presentation", "spreadsheet"]).length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={6} className="text-center h-24">
                           Inga dokumentfiler hittades
                         </TableCell>
                       </TableRow>
                     ) : (
-                      sortedFiles.filter(file => ["pdf", "presentation", "spreadsheet"].includes(file.type)).map((file) => (
+                      filterByTypes(sortedFiles, ["pdf", "presentation", "spreadsheet"]).map((file) => (
                         <TableRow key={file.id}>
                           <TableCell>{getFileIcon(file.type)}</TableCell>
                           <TableCell className="font-medium">{file.name}</TableCell>
@@ -393,14 +358,14 @@ VPN Connection,Automatic,2023-03-15`;
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {sortedFiles.filter(file => file.type === "image").length === 0 ? (
+                    {filterByTypes(sortedFiles, ["image"]).length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={5} className="text-center h-24">
                           Inga mediafiler hittades
                         </TableCell>
                       </TableRow>
                     ) : (
-                      sortedFiles.filter(file => file.type === "image").map((file) => (
+                      filterByTypes(sortedFiles, ["image"]).map((file) => (
                         <TableRow key={file.id}>
                           <TableCell className="font-medium">{file.name}</TableCell>
                           <TableCell className="text-sm text-muted-foreground">{file.path}</TableCell>
@@ -447,14 +412,14 @@ VPN Connection,Automatic,2023-03-15`;
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {sortedFiles.filter(file => file.type === "certificate").length === 0 ? (
+                    {filterByTypes(sortedFiles, ["certificate"]).length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={5} className="text-center h-24">
                           Inga certifikatfiler hittades
                         </TableCell>
                       </TableRow>
                     ) : (
-                      sortedFiles.filter(file => file.type === "certificate").map((file) => (
+                      filterByTypes(sortedFiles, ["certificate"]).map((file) => (
                         <TableRow key={file.id}>
                           <TableCell className="font-medium">{file.name}</TableCell>
                           <TableCell className="text-sm text-muted-foreground">{file.path}</TableCell>
@@ -492,7 +457,7 @@ VPN Connection,Automatic,2023-03-15`;
           <ScrollArea className="max-h-[500px]">
             <div className="bg-muted p-4 rounded-md">
               <pre className="whitespace-pre-wrap text-sm font-mono">
-                {selectedFile ? getFileContent(selectedFile) : ""}
+                {selectedFile?.content || "Innehåll kan inte visas"}
               </pre>
             </div>
           </ScrollArea>

@@ -145,7 +145,7 @@ export async function getClients(): Promise<ClientInstruction[]> {
     return data;
   } catch (error) {
     console.error("Error fetching clients:", error);
-    // Return empty array rather than mock data
+    // Return empty array on error
     return [];
   }
 }
@@ -202,7 +202,7 @@ export async function getServerConfig() {
     return data;
   } catch (error) {
     console.error("Error fetching server config:", error);
-    // Return null instead of mock data
+    // Return null on error
     return null;
   }
 }

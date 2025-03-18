@@ -10,8 +10,8 @@ import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { getClients } from "@/services/scriptsService";
 
-// Fallback dashboard data in case of API failure
-const fallbackData = {
+// Empty fallback data in case of API failure
+const emptyFallbackData = {
   totalClients: 0,
   activeClients: 0,
   storageUsed: "0 GB",
@@ -37,8 +37,8 @@ const Index = () => {
         const clients = await getClients();
         
         if (!clients || clients.length === 0) {
-          console.log("No clients found, using fallback data");
-          return fallbackData;
+          console.log("No clients found, using empty data");
+          return emptyFallbackData;
         }
         
         // Calculate active clients (active within last 30 minutes)
@@ -51,11 +51,10 @@ const Index = () => {
         console.log(`Found ${clients.length} total clients, ${activeClients} active`);
         
         // Generate activity data based on real client data
-        // This should be fetched from a real API endpoint in production
-        const activityData = generateActivityData();
+        const activityData = generateActivityDataFromClients(clients);
         
         // Calculate storage used based on client count
-        // In production, this should come from a real API endpoint
+        // This is an estimate until real metrics are available
         const storageSize = (clients.length * 0.1).toFixed(1);
         
         // Create recent activities from client data
@@ -85,17 +84,24 @@ const Index = () => {
     staleTime: 60000 // 1 minute
   });
 
-  // Generate activity data for the chart
-  const generateActivityData = () => {
-    const hours = [0, 4, 8, 12, 16, 20];
-    return hours.map(hour => {
+  // Generate activity data based on real client data
+  const generateActivityDataFromClients = (clients) => {
+    // Group data into 6 time periods for simplicity
+    const hourGroups = [0, 4, 8, 12, 16, 20];
+    
+    return hourGroups.map(hour => {
       const hourStr = hour.toString().padStart(2, '0') + ":00";
-      // Generate some random data based on the hour
-      // In a real implementation, you would fetch this from the server
-      const activityLevel = hour >= 8 && hour <= 16 ? 
-        Math.floor(Math.random() * 50) + 50 : 
-        Math.floor(Math.random() * 25);
-        
+      
+      // Find clients with activity in this time period
+      const clientsInPeriod = clients.filter(client => {
+        if (!client.lastActivity) return false;
+        const lastActivityHour = new Date(client.lastActivity).getHours();
+        return lastActivityHour >= hour && lastActivityHour < (hour + 4);
+      });
+      
+      // Create activity data based on number of clients in this period
+      const activityLevel = clientsInPeriod.length * 5;
+      
       return {
         name: hourStr,
         keystrokes: activityLevel,
@@ -111,7 +117,7 @@ const Index = () => {
   }
 
   // Use data with fallback to empty values if API fails
-  const dashboardData = data || fallbackData;
+  const dashboardData = data || emptyFallbackData;
 
   return (
     <AppLayout>
