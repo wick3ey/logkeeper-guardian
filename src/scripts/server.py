@@ -860,4 +860,4 @@ def api_heartbeat(client_id):
         logging.debug(f"Heartbeat uppdaterad för klient {client_id}")
         
         # Hämta aktiv instruktion att skicka tillbaka
-        instruction_name = client_index[client_id
+        instruction_name = client_index[client_id].get

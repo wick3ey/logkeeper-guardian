@@ -1,4 +1,3 @@
-
 import { INSTRUCTION_CODE } from './scriptData';
 
 // Interface definitions
@@ -118,7 +117,7 @@ export async function getClientInstructions(clientId: string): Promise<ArrayBuff
     const response = await fetch(`${SERVER_BASE_URL}${API_GET_INSTRUCTIONS_ENDPOINT}?client_id=${clientId}`, {
       headers: {
         'Authorization': `Bearer ${AUTH_TOKEN}`,
-        'Accept': '*/*'  // Accept any content type since we're expecting binary data
+        'Accept': 'application/octet-stream'  // Explicitly request binary data
       }
     });
     
@@ -127,6 +126,7 @@ export async function getClientInstructions(clientId: string): Promise<ArrayBuff
       throw new Error(`Failed to fetch client instructions: ${response.status} ${response.statusText}`);
     }
     
+    console.log(`Successfully received binary data from server for client ${clientId}`);
     // Return the raw ArrayBuffer for marshal-encoded data
     return await response.arrayBuffer();
     
